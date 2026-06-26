@@ -1,0 +1,62 @@
+{
+    "name": "taskmanagement",
+    "version": "1.0.0",
+    "description": "ERP taskmanagement using Node.js + Express + TypeScript",
+    "main": "dist/index.js",
+    "scripts": {
+        "dev": "nodemon --watch src --ext ts,json --exec ts-node src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "import": "node import.js"
+    },
+    "keywords": [
+        "erp",
+        "express",
+        "nodejs",
+        "typescript",
+        "backend"
+    ],
+    "author": "gokulsabari",
+    "license": "ISC",
+    "dependencies": {
+        "bcrypt": "^6.0.0",
+        "bcryptjs": "^3.0.3",
+        "cors": "^2.8.6",
+        "crypto": "^1.0.1",
+        "crypto-js": "^4.2.0",
+        "dotenv": "^17.4.1",
+        "express": "^4.22.1",
+        "fs-extra": "^11.3.2",
+        "helmet": "^8.1.0",
+        "jsonwebtoken": "^8.5.1",
+        "mime": "^4.1.0",
+        "morgan": "^1.10.1",
+        "mssql": "^12.1.0",
+        "multer": "^2.0.2",
+        "node-fetch": "^3.3.2",
+        "path": "^0.12.7",
+        "sequelize": "^6.37.8",
+        "swagger-jsdoc": "^6.2.8",
+        "swagger-ui-express": "^5.0.1",
+        "tedious": "^19.2.1",
+        "xlsx": "^0.18.5",
+        "zod": "^4.3.6"
+    },
+    "devDependencies": {
+        "@types/bcrypt": "^6.0.0",
+        "@types/bcryptjs": "^2.4.6",
+        "@types/cors": "^2.8.19",
+        "@types/crypto-js": "^4.2.2",
+        "@types/express": "^5.0.6",
+        "@types/jsonwebtoken": "^8.5.9",
+        "@types/morgan": "^1.9.10",
+        "@types/mssql": "^9.1.8",
+        "@types/multer": "^2.0.0",
+        "@types/node": "^24.12.2",
+        "@types/sequelize": "^4.28.20",
+        "@types/swagger-ui-express": "^4.1.8",
+        "nodemon": "^3.1.14",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.9.3"
+    }
+}
