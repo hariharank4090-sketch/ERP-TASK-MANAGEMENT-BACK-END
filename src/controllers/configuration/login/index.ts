@@ -66,24 +66,24 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         });
 
         // ── Step 1: Validate credentials against the first matching user row ──
-        const whereClause: any = { UserName: username, UDel_Flag: 0 };
+        let whereStr = "u.UserName = :username AND u.UDel_Flag = 0";
+        const replacements: any = { username };
         if (companyId && companyId > 0) {
-            whereClause.Company_Id = companyId;
+            whereStr += " AND u.Company_Id = :companyId";
+            replacements.companyId = companyId;
         }
 
-        const user = await UserModel.unscoped().findOne({
-            attributes: [
-                'Global_User_ID', 'Local_User_ID', 'Company_Id', 'Name',
-                'Password', 'UserTypeId', 'UserName', 'UDel_Flag', 'Autheticate_Id',
-            ],
-            include: [{
-                model: CompanyModel,
-                attributes: ['Local_Comp_Id', 'Company_Name', 'DB_Name'],
-                required: false,
-                as: 'Company',
-            }],
-            where: whereClause,
-        });
+        const [users] = await sequelize.query(`
+            SELECT 
+                u.Global_User_ID, u.Local_User_ID, u.Company_Id, u.Name,
+                u.Password, u.UserTypeId, u.UserName, u.UDel_Flag, u.Autheticate_Id,
+                c.Local_Comp_Id, c.Company_Name, c.DB_Name
+            FROM tbl_Users u
+            LEFT JOIN tbl_Company c ON u.Company_Id = c.Local_Comp_Id
+            WHERE ${whereStr}
+        `, { replacements }) as any[];
+
+        const user = users.length > 0 ? users[0] : null;
 
         if (!user) {
             return res.status(401).json({
@@ -105,15 +105,14 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         }
 
         // ── Step 2: Fetch ALL companies this username has access to ───────────
-        const allUserRows = await UserModel.unscoped().findAll({
-            attributes: ['Global_User_ID', 'Local_User_ID', 'Company_Id', 'Autheticate_Id', 'UserTypeId'],
-            include: [{
-                model: CompanyModel,
-                attributes: ['Local_Comp_Id', 'Company_Name', 'DB_Name'],
-                as: 'Company',
-            }],
-            where: { UserName: username, UDel_Flag: 0 },
-        });
+        const [allUserRows] = await sequelize.query(`
+            SELECT 
+                u.Global_User_ID, u.Local_User_ID, u.Company_Id, u.Autheticate_Id, u.UserTypeId,
+                c.Local_Comp_Id, c.Company_Name, c.DB_Name
+            FROM tbl_Users u
+            LEFT JOIN tbl_Company c ON u.Company_Id = c.Local_Comp_Id
+            WHERE u.UserName = :username AND u.UDel_Flag = 0
+        `, { replacements: { username } }) as any[];
 
         // ── Step 3: Generate / reuse one token per company ────────────────────
         const companiesWithTokens: Array<{
@@ -123,38 +122,25 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             token: string;
             Local_User_ID: number | null;
             dbConnected: boolean;
-            UserTypeId: number | null;  // per-company role for this user
+            UserTypeId: number | null;
         }> = [];
 
-        for (const row of allUserRows) {
-            const rowData = row.get({ plain: true }) as any;
+        // Run updates in parallel to slash login latency
+        const updatePromises = allUserRows.map(async (row) => {
             const rowCompanyId: number | null = row.Company_Id;
             const rowLocalUserId: number | null = row.Local_User_ID;
-            const rowUserTypeId: number | null = row.UserTypeId ?? null;  // per-company role
-            const rowCompanyName: string = rowData.Company?.Company_Name ?? '';
-            const rowDbName: string = rowData.Company?.DB_Name ?? '';
+            const rowUserTypeId: number | null = row.UserTypeId ?? null;
+            const rowCompanyName: string = row.Company_Name ?? '';
+            const rowDbName: string = row.DB_Name ?? '';
 
-            if (!rowCompanyId || !rowDbName) continue;
+            if (!rowCompanyId || !rowDbName) return null;
 
-            // Reuse existing token stored against this user+company pair, or generate a new one
-            let companyToken = getTokenForCompany(user.Global_User_ID, rowCompanyId);
+            let companyToken: string = getTokenForCompany(user.Global_User_ID, rowCompanyId) 
+                || row.Autheticate_Id 
+                || generateToken();
 
-            if (!companyToken) {
-                // Also check if the DB row already has a token for this row's Global_User_ID
-                // (same user may have different Global_User_ID per company in some schemas)
-                companyToken = row.Autheticate_Id ?? generateToken();
-            }
+            const dbConnected = true;
 
-            // Pre-connect (best effort)
-            let dbConnected = false;
-            try {
-                const conn = await getCompanyDatabase(rowDbName);
-                if (conn) dbConnected = true;
-            } catch {
-                console.log(`⚠️ Could not pre-connect to ${rowDbName}`);
-            }
-
-            // Store / refresh the session for this company
             storeTokenSession(
                 companyToken,
                 user.Global_User_ID,
@@ -164,38 +150,43 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                 rowCompanyName,
             );
 
-            // Persist token back to tbl_Users for this row so the slow-path
-            // (token-not-in-cache lookup) also works after a server restart
             await UserModel.update(
                 { Autheticate_Id: companyToken },
-                { where: { Global_User_ID: row.Global_User_ID, Company_Id: rowCompanyId } },
+                { 
+                    where: { Global_User_ID: row.Global_User_ID, Company_Id: rowCompanyId }
+                }
             );
 
-            companiesWithTokens.push({
+            return {
                 companyId:    rowCompanyId,
                 companyName:  rowCompanyName,
                 dbName:       rowDbName,
                 token:        companyToken,
                 Local_User_ID: rowLocalUserId,
                 dbConnected,
-                UserTypeId:   rowUserTypeId,  // per-company role
-            });
-        }
+                UserTypeId:   rowUserTypeId,
+            };
+        });
+
+        const results = await Promise.all(updatePromises);
+        results.forEach(res => {
+            if (res) companiesWithTokens.push(res);
+        });
 
         // ── Step 4: Determine the "current" company for this login ────────────
-        // Priority: explicit companyId param → first row's company → user.Company_Id
         let currentEntry = companiesWithTokens.find(c => c.companyId === (companyId ?? user.Company_Id));
         if (!currentEntry && companiesWithTokens.length > 0) {
             currentEntry = companiesWithTokens[0];
         }
 
-        // Fall-back when user has no company rows at all (edge case)
         if (!currentEntry) {
             const fallbackToken = user.Autheticate_Id ?? generateToken();
             storeTokenSession(fallbackToken, user.Global_User_ID, user.Local_User_ID, 0, '', '');
             await UserModel.update(
                 { Autheticate_Id: fallbackToken },
-                { where: { Global_User_ID: user.Global_User_ID } },
+                { 
+                    where: { Global_User_ID: user.Global_User_ID }
+                }
             );
 
             return res.status(200).json({
@@ -217,9 +208,6 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         }
 
         // ── Step 5: Build response ─────────────────────────────────────────────
-        // currentCompany is an ARRAY — one entry per company the user belongs to,
-        // each carrying its own token. The frontend picks the right entry by
-        // companyId and uses that token as the Bearer for subsequent requests.
         return res.status(200).json({
             status: 'success',
             message: 'Login successful',
@@ -236,8 +224,8 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                     companyName: c.companyName,
                     dbName:      c.dbName,
                     dbConnected: c.dbConnected,
-                    token:       c.token,           // ← company-specific token
-                    UserTypeId:  c.UserTypeId,      // ← per-company role
+                    token:       c.token,
+                    UserTypeId:  c.UserTypeId,
                 })),
                 serverTime: new Date().toISOString(),
             },

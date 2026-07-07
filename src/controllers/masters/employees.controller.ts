@@ -24,8 +24,8 @@ export const getEmployeesByProject = async (req: Request, res: Response) => {
                 e.Designation,
                 e.Email,
                 e.Mobile
-            FROM tbl_Employee_Master e
-            INNER JOIN tbl_Project_Employee pe ON e.Emp_Id = pe.Emp_Id
+            FROM tbl_Employee_Master e WITH (NOLOCK)
+            INNER JOIN tbl_Project_Employee pe WITH (NOLOCK) ON e.Emp_Id = pe.Emp_Id
             WHERE pe.Project_Id = :projectId 
             AND (pe.Del_Flag IS NULL OR pe.Del_Flag = 0)
             AND (e.Del_Flag IS NULL OR e.Del_Flag = 0)
@@ -62,7 +62,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
                 Designation,
                 Email,
                 Mobile
-            FROM tbl_Employee_Master
+            FROM tbl_Employee_Master WITH (NOLOCK)
             WHERE Del_Flag IS NULL OR Del_Flag = 0
             ORDER BY Emp_Name
         `, {

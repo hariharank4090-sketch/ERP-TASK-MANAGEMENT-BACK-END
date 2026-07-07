@@ -94,7 +94,7 @@ const parseParameters = (parametersJson: string | null): WorkParameterWithDetail
     catch { return []; }
 };
 
-const WORK_DETAIL_SELECT = `
+const WORK_DETAIL_SELECT_BASE = `
     SELECT 
         wm.SNo, wm.Work_Id, wm.Sch_Id, wm.Task_Id, wm.Emp_Id, wm.Work_Dt,
         wm.Work_Done, wm.Start_Time, wm.End_Time, wm.Tot_Minutes, wm.Work_Status,
@@ -103,20 +103,33 @@ const WORK_DETAIL_SELECT = `
         ps.Sch_No, ps.Sch_Date, ps.Task_Type_Id, ps.Sch_Plan_Id,
         ps.Task_Sch_Timer_Based, ps.Sch_Est_Start_Time, ps.Sch_Est_End_Time,
         ps.Task_Sch_Duaration, ps.Sch_Status,
-        ps.Sch_Start_Date, ps.Sch_End_Date,
-        (
-            SELECT wp.WNo, wp.Param_Id, tp.Paramet_Data_Type, tp.PA_Id,
-                   wp.Default_Value, wp.Current_Value
-            FROM tbl_Work_Paramet_DT wp
-            LEFT JOIN tbl_Task_Paramet_DT tp 
-                ON wp.Task_Id = tp.Task_Id AND wp.Param_Id = tp.Param_Id
-            WHERE wp.Work_Id = wm.Work_Id
-            FOR JSON PATH
-        ) as parameters
+        ps.Sch_Start_Date, ps.Sch_End_Date
+`;
+
+const WORK_DETAIL_FROM_CLAUSE = `
     FROM tbl_Work_Master wm
     LEFT JOIN tbl_Task t ON wm.Task_Id = t.Task_Id
     LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
     LEFT JOIN tbl_Project_Schedule ps ON wm.Sch_Id = ps.Sch_Id
+`;
+
+const WORK_DETAIL_SELECT = `
+    ${WORK_DETAIL_SELECT_BASE},
+    (
+        SELECT wp.WNo, wp.Param_Id, tp.Paramet_Data_Type, tp.PA_Id,
+               wp.Default_Value, wp.Current_Value
+        FROM tbl_Work_Paramet_DT wp
+        LEFT JOIN tbl_Task_Paramet_DT tp
+            ON wp.Task_Id = tp.Task_Id AND wp.Param_Id = tp.Param_Id
+        WHERE wp.Work_Id = wm.Work_Id
+        FOR JSON PATH
+    ) as parameters
+    ${WORK_DETAIL_FROM_CLAUSE}
+`;
+
+const WORK_DETAIL_SELECT_NO_PARAMS = `
+    ${WORK_DETAIL_SELECT_BASE}
+    ${WORK_DETAIL_FROM_CLAUSE}
 `;
 
 const formatWorkRow = (row: WorkWithDetails, index: number = 0): any => ({
@@ -192,9 +205,43 @@ export const getAllWorks = async (req: Request, res: Response) => {
         }
 
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-        const query = `${WORK_DETAIL_SELECT} ${whereClause} ORDER BY wm.${sortBy} ${sortOrder}`;
-
+        const query = `${WORK_DETAIL_SELECT_NO_PARAMS} ${whereClause} ORDER BY wm.${sortBy} ${sortOrder}`;
         const rows = await sequelizeInstance.query<WorkWithDetails>(query, { replacements, type: QueryTypes.SELECT });
+
+        // Fetch all parameters in fast bulk chunks to avoid implicit conversion and parameter limits
+        if (rows.length > 0) {
+            // Explicitly cast to Number so SQL Server uses the INT index instead of scanning (NVARCHAR conversion)
+            const allWorkIds = rows.map(r => Number(r.Work_Id)).filter(id => !isNaN(id));
+
+            const paramsMap = new Map();
+
+            // Process in chunks of 500 to avoid SQL Server limits
+            const chunkSize = 500;
+            for (let i = 0; i < allWorkIds.length; i += chunkSize) {
+                const chunkIds = allWorkIds.slice(i, i + chunkSize);
+                if (chunkIds.length === 0) continue;
+
+                const params = await sequelizeInstance.query(`
+                    SELECT wp.Work_Id, wp.WNo, wp.Param_Id, tp.Paramet_Data_Type, tp.PA_Id,
+                           wp.Default_Value, wp.Current_Value
+                    FROM tbl_Work_Paramet_DT wp
+                    LEFT JOIN tbl_Task_Paramet_DT tp
+                        ON wp.Task_Id = tp.Task_Id AND wp.Param_Id = tp.Param_Id
+                    WHERE wp.Work_Id IN (:chunkIds)
+                `, { replacements: { chunkIds }, type: QueryTypes.SELECT }) as any[];
+
+                params.forEach(p => {
+                    if (!paramsMap.has(p.Work_Id)) paramsMap.set(p.Work_Id, []);
+                    paramsMap.get(p.Work_Id).push(p);
+                });
+            }
+
+            rows.forEach(r => {
+                const id = Number(r.Work_Id);
+                r.parameters = JSON.stringify(paramsMap.get(id) || []);
+            });
+        }
+
         return res.status(200).json({ success: true, message: 'Works retrieved successfully', data: rows.map(formatWorkRow) });
 
     } catch (e: any) {
@@ -242,25 +289,36 @@ const getNextWorkId = async (sequelizeInstance: Sequelize, transaction: Transact
 };
 
 const checkExistingWork = async (
-    sequelizeInstance: Sequelize, 
-    schId: number, 
-    taskId: number, 
-    empId: number, 
+    sequelizeInstance: Sequelize,
+    schId: number,
+    taskId: number,
+    empId: number,
     workDt: Date,
     transaction: Transaction
 ): Promise<any | null> => {
+    const toSqlDateTime = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ` +
+        `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.000`;
+
+    const startOfDay = toSqlDateTime(workDt);
+    const nextDay = new Date(workDt);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const endOfDay = toSqlDateTime(nextDay);
+
     const result = await sequelizeInstance.query(
         `SELECT SNo, Work_Id FROM tbl_Work_Master 
          WHERE Sch_Id = :schId 
            AND Task_Id = :taskId 
            AND Emp_Id = :empId 
-           AND CAST(Work_Dt AS DATE) = CAST(:workDt AS DATE)`,
-        { 
-            replacements: { schId, taskId, empId, workDt }, 
-            type: QueryTypes.SELECT, 
-            transaction 
+           AND Work_Dt >= :startOfDay
+           AND Work_Dt < :endOfDay`,
+        {
+            replacements: { schId, taskId, empId, startOfDay, endOfDay },
+            type: QueryTypes.SELECT,
+            transaction
         }
     ) as any[];
+
     return result.length ? result[0] : null;
 };
 
@@ -280,7 +338,7 @@ const updateExistingWork = async (
     if (data.Tot_Minutes !== undefined) { setClauses.push('Tot_Minutes = :totMinutes'); replacements.totMinutes = data.Tot_Minutes; }
     if (data.Work_Status !== undefined) { setClauses.push('Work_Status = :workStatus'); replacements.workStatus = data.Work_Status; }
     if (data.Process_Id !== undefined) { setClauses.push('Process_Id = :processId'); replacements.processId = data.Process_Id; }
-    
+
     setClauses.push('Update_Date = GETDATE()');
 
     if (setClauses.length > 1) {
@@ -384,10 +442,21 @@ export const createWork = async (req: Request, res: Response) => {
     const sequelizeInstance = getSequelizeFromRequest(req);
     const transaction = await (sequelizeInstance as any).transaction();
 
+
+    const safeRollback = async () => {
+        if (!transaction.finished) {
+            try {
+                await transaction.rollback();
+            } catch (rollbackErr) {
+                console.error('Rollback failed:', rollbackErr);
+            }
+        }
+    };
+
     try {
         const validation = validateWithZod<WorkMasterCreateInput>(workMasterCreateSchema, req.body);
         if (!validation.success) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(400).json({ success: false, message: 'Validation failed', errors: validation.errors });
         }
 
@@ -395,33 +464,31 @@ export const createWork = async (req: Request, res: Response) => {
         const workDate = new Date(data.Work_Dt);
         workDate.setHours(0, 0, 0, 0);
 
-        // ── Verify Task exists ──
+
         const taskResult = await sequelizeInstance.query(
             `SELECT Task_Id FROM tbl_Task WHERE Task_Id = :taskId`,
-            { replacements: { taskId: data.Task_Id }, type: QueryTypes.SELECT, transaction }
+            { replacements: { taskId: String(data.Task_Id) }, type: QueryTypes.SELECT, transaction }
         );
         if (!(taskResult as any[]).length) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(400).json({ success: false, message: 'Invalid Task_Id. Task does not exist.' });
         }
 
-        // ── Verify Schedule exists ──
         const scheduleResult = await sequelizeInstance.query(
             `SELECT Sch_Id FROM tbl_Project_Schedule WHERE Sch_Id = :schId`,
             { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }
         );
         if (!(scheduleResult as any[]).length) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(400).json({ success: false, message: 'Invalid Sch_Id. Schedule does not exist.' });
         }
 
-        // ── Check if work already exists with same Sch_Id, Task_Id, Emp_Id, Work_Dt ──
         const existingWork = await checkExistingWork(
-            sequelizeInstance, 
-            data.Sch_Id, 
-            data.Task_Id, 
-            data.Emp_Id, 
-            workDate, 
+            sequelizeInstance,
+            data.Sch_Id,
+            data.Task_Id,
+            data.Emp_Id,
+            workDate,
             transaction
         );
 
@@ -429,19 +496,16 @@ export const createWork = async (req: Request, res: Response) => {
         let isUpdate = false;
 
         if (existingWork) {
-            // Update existing work
             await updateExistingWork(sequelizeInstance, existingWork.SNo, existingWork.Work_Id, data, transaction);
             sno = existingWork.SNo;
             isUpdate = true;
         } else {
-            // Generate next Work_Id and insert new work
             const nextWorkId = await getNextWorkId(sequelizeInstance, transaction);
             sno = await insertNewWork(sequelizeInstance, data, nextWorkId, workDate, transaction);
         }
 
         await transaction.commit();
 
-        // ── Return full row with joins ──
         const result = await sequelizeInstance.query<WorkWithDetails>(
             `${WORK_DETAIL_SELECT} WHERE wm.SNo = :sno`,
             { replacements: { sno }, type: QueryTypes.SELECT }
@@ -452,14 +516,14 @@ export const createWork = async (req: Request, res: Response) => {
 
         return res.status(statusCode).json({
             success: true,
-            message: message,
+            message,
             data: result.length ? formatWorkRow(result[0], 0) : null
         });
 
     } catch (e: any) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error('Create/Update Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error' });
+        return res.status(500).json({ success: false, message: e.message || 'Internal server error', error: e });
     }
 };
 
@@ -474,7 +538,7 @@ export const updateWork = async (req: Request, res: Response) => {
     try {
         const idValidation = validateWithZod<{ id: number }>(workMasterIdSchema, req.params);
         if (!idValidation.success) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(400).json({ success: false, message: 'Invalid ID parameter' });
         }
 
@@ -486,7 +550,7 @@ export const updateWork = async (req: Request, res: Response) => {
         ) as any[];
 
         if (!existing.length) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(404).json({ success: false, message: 'Work not found' });
         }
 
@@ -494,7 +558,7 @@ export const updateWork = async (req: Request, res: Response) => {
 
         const bodyValidation = validateWithZod<WorkMasterUpdateInput>(workMasterUpdateSchema, req.body);
         if (!bodyValidation.success) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(400).json({ success: false, message: 'Validation failed', errors: bodyValidation.errors });
         }
 
@@ -508,22 +572,22 @@ export const updateWork = async (req: Request, res: Response) => {
                 { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }
             ) as any[];
             if (!sr.length) {
-                await transaction.rollback();
+                await transaction.rollback().catch(() => {});
                 return res.status(400).json({ success: false, message: 'Invalid Sch_Id. Schedule does not exist.' });
             }
             setClauses.push('Sch_Id = :schId'); replacements.schId = data.Sch_Id;
         }
-        if (data.Task_Id !== undefined) { 
+        if (data.Task_Id !== undefined) {
             const taskCheck = await sequelizeInstance.query(
                 `SELECT Task_Id FROM tbl_Task WHERE Task_Id = :taskId`,
                 { replacements: { taskId: data.Task_Id }, type: QueryTypes.SELECT, transaction }
             ) as any[];
             if (!taskCheck.length) {
-                await transaction.rollback();
+                await transaction.rollback().catch(() => {});
                 return res.status(400).json({ success: false, message: 'Invalid Task_Id. Task does not exist.' });
             }
-            setClauses.push('Task_Id = :taskId'); 
-            replacements.taskId = data.Task_Id; 
+            setClauses.push('Task_Id = :taskId');
+            replacements.taskId = data.Task_Id;
         }
         if (data.Emp_Id !== undefined) { setClauses.push('Emp_Id = :empId'); replacements.empId = data.Emp_Id; }
         if (data.Work_Dt !== undefined) { setClauses.push('Work_Dt = :workDt'); replacements.workDt = new Date(data.Work_Dt as any); }
@@ -577,9 +641,9 @@ export const updateWork = async (req: Request, res: Response) => {
         return res.status(200).json({ success: true, message: 'Work updated successfully', data: formatWorkRow(result[0], 0) });
 
     } catch (e: any) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error('Update Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error' });
+        return res.status(500).json({ success: false, message: e.message || 'Internal server error', error: e });
     }
 };
 
@@ -594,7 +658,7 @@ export const deleteWork = async (req: Request, res: Response) => {
     try {
         const validation = validateWithZod<{ id: number }>(workMasterIdSchema, req.params);
         if (!validation.success) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(400).json({ success: false, message: 'Invalid ID parameter' });
         }
 
@@ -605,7 +669,7 @@ export const deleteWork = async (req: Request, res: Response) => {
         ) as any[];
 
         if (!existing.length) {
-            await transaction.rollback();
+            await transaction.rollback().catch(() => {});
             return res.status(404).json({ success: false, message: 'Work not found' });
         }
 
@@ -620,9 +684,9 @@ export const deleteWork = async (req: Request, res: Response) => {
         return res.status(200).json({ success: true, message: 'Work deleted successfully' });
 
     } catch (e: any) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error('Delete Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error' });
+        return res.status(500).json({ success: false, message: e.message || 'Internal server error', error: e });
     }
 };
 

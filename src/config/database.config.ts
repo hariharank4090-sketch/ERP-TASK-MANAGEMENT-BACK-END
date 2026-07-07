@@ -1,4 +1,4 @@
-import { Sequelize } from 'sequelize';
+import { Sequelize, Transaction } from 'sequelize';
 import sql from 'mssql';
 import dotenv from 'dotenv';
 
@@ -65,9 +65,14 @@ function buildDialectOptions(instance?: string, explicitPort?: number): any {
             encrypt: false,
             trustServerCertificate: true,
             requestTimeout: 60000,
-            connectionTimeout: 30000,
+            connectTimeout: 60000,  // WAN-safe: remote server needs more time to connect
+            enableArithAbort: true,   // Faster SQL Server query execution
+            abortTransactionOnError: true,
+            keepAlive: true,          // Prevent firewall from silently dropping connections
+            keepAliveInitialDelay: 10000,
         },
     };
+    // Only set instanceName when NO explicit port — explicit port skips Browser service lookup
     if (instance && !explicitPort) {
         opts.options.instanceName = instance;
     }
@@ -87,7 +92,24 @@ export const getDefaultConnection = (): Sequelize => {
             database: process.env.DATABASE,
             logging: false,
             dialectOptions: buildDialectOptions(h.instance, h.port),
-            pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
+            pool: { max: 50, min: 0, acquire: 60000, idle: 1000, evict: 1000 },
+            retry: {
+                match: [
+                    /ECONNRESET/,
+                    /ConnectionError/,
+                    /SequelizeConnectionError/,
+                    /SequelizeConnectionRefusedError/,
+                    /SequelizeHostNotFoundError/,
+                    /SequelizeHostNotReachableError/,
+                    /SequelizeInvalidConnectionError/,
+                    /SequelizeConnectionAcquireTimeoutError/,
+                    /ETIMEOUT/,
+                    /EINVALIDSTATE/,
+                    /LoggedIn state/
+                ],
+                max: 3
+            },
+            isolationLevel: Transaction.ISOLATION_LEVELS.READ_UNCOMMITTED,
         });
     }
     return defaultConnection;
@@ -95,15 +117,9 @@ export const getDefaultConnection = (): Sequelize => {
 
 // Get default SQL connection pool (for mssql queries)
 export const getDefaultSqlConnection = async (): Promise<sql.ConnectionPool> => {
-    if (defaultSqlPool) {
-        try {
-            await defaultSqlPool.request().query('SELECT 1');
-            console.log('♻️ Reusing default SQL connection');
-            return defaultSqlPool;
-        } catch (error) {
-            console.warn('🔄 Stale default SQL connection, reconnecting…');
-            defaultSqlPool = null;
-        }
+    // Return cached pool directly — no ping to save round-trip latency
+    if (defaultSqlPool && defaultSqlPool.connected) {
+        return defaultSqlPool;
     }
 
     const config: sql.config = {
@@ -115,12 +131,13 @@ export const getDefaultSqlConnection = async (): Promise<sql.ConnectionPool> => 
             encrypt: false,
             trustServerCertificate: true,
             requestTimeout: 60000,
-            connectTimeout: 30000,
+            connectTimeout: 60000,     // WAN-safe: remote server needs more time to connect
+            enableArithAbort: true,   // Faster SQL Server query execution
         },
         pool: {
-            max: 10,
-            min: 0,
-            idleTimeoutMillis: 30000
+            max: 30,
+            min: 5,
+            idleTimeoutMillis: 60000
         }
     };
 
@@ -176,25 +193,20 @@ export function getCompanyConfigByDBName(dbName: string): CompanyDBConfig | null
 
 export async function getCompanyDatabase(identifier: number | string): Promise<Sequelize> {
     let config: CompanyDBConfig | null;
-    let cacheKey: string;
     if (typeof identifier === 'number') {
         config = getCompanyConfig(identifier);
-        cacheKey = `company_${identifier}`;
     } else {
         config = getCompanyConfigByDBName(identifier);
-        cacheKey = `db_${identifier}`;
     }
+    
     if (!config) throw new Error(`No DB configuration found for: ${identifier}`);
+    
+    // Always use the deterministic company ID as the cache key to prevent duplicate pools
+    const cacheKey = `company_${config.id}`;
     if (companyConnections.has(cacheKey)) {
-        const existing = companyConnections.get(cacheKey)!;
-        try {
-            await existing.authenticate();
-            console.log(`♻️ Reusing connection: ${config.database}`);
-            return existing;
-        } catch {
-            console.warn(`🔄 Stale connection for ${config.database}, reconnecting…`);
-            companyConnections.delete(cacheKey);
-        }
+        // Return cached connection directly — no authenticate() ping to save round-trip latency
+        console.log(`♻️ Reusing connection: ${config.database}`);
+        return companyConnections.get(cacheKey)!;
     }
     const usePort = config.port ?? (config.instance ? undefined : 1433);
     const seq = new Sequelize({
@@ -206,7 +218,24 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
         database: config.database,
         logging: false,
         dialectOptions: buildDialectOptions(config.instance, config.port),
-        pool: { max: 10, min: 0, acquire: 30000, idle: 10000 },
+        pool: { max: 50, min: 0, acquire: 60000, idle: 1000, evict: 1000 },
+        retry: {
+            match: [
+                /ECONNRESET/,
+                /ConnectionError/,
+                /SequelizeConnectionError/,
+                /SequelizeConnectionRefusedError/,
+                /SequelizeHostNotFoundError/,
+                /SequelizeHostNotReachableError/,
+                /SequelizeInvalidConnectionError/,
+                /SequelizeConnectionAcquireTimeoutError/,
+                /ETIMEOUT/,
+                /EINVALIDSTATE/,
+                /LoggedIn state/
+            ],
+            max: 3
+        },
+        isolationLevel: Transaction.ISOLATION_LEVELS.READ_UNCOMMITTED,
     });
     try {
         await seq.authenticate();
@@ -311,17 +340,14 @@ export function getConnectionStats() {
 // Cache for SQL connection pools
 export const getCompanySqlConnection = async (companyId: number | string): Promise<sql.ConnectionPool> => {
     const key = `company_${companyId}`;
-    
+
+    // Return cached pool directly — no ping to save round-trip latency
     if (sqlConnectionPools.has(key)) {
         const pool = sqlConnectionPools.get(key)!;
-        try {
-            await pool.request().query('SELECT 1');
-            console.log(`♻️ Reusing SQL connection for company: ${companyId}`);
+        if (pool.connected) {
             return pool;
-        } catch (error) {
-            console.warn(`⚠️ Stale connection for company ${companyId}, reconnecting...`);
-            sqlConnectionPools.delete(key);
         }
+        sqlConnectionPools.delete(key);
     }
 
     let config: CompanyDBConfig | null;
@@ -336,9 +362,9 @@ export const getCompanySqlConnection = async (companyId: number | string): Promi
     }
 
     const usePort = config.port ?? (config.instance ? undefined : 1433);
-    
+
     console.log(`🔌 Creating SQL connection for company: ${config.name} (${config.database})`);
-    
+
     const sqlConfig: sql.config = {
         server: config.host,
         ...(usePort && { port: usePort }),
@@ -349,13 +375,14 @@ export const getCompanySqlConnection = async (companyId: number | string): Promi
             encrypt: false,
             trustServerCertificate: true,
             requestTimeout: 60000,
-            connectTimeout: 30000,
+            connectTimeout: 60000,     // WAN-safe: remote server needs more time to connect
+            enableArithAbort: true,   // Faster SQL Server query execution
             ...(config.instance && !config.port && { instanceName: config.instance }),
         },
         pool: {
-            max: 10,
-            min: 0,
-            idleTimeoutMillis: 30000
+            max: 30,
+            min: 5,
+            idleTimeoutMillis: 60000
         }
     };
 

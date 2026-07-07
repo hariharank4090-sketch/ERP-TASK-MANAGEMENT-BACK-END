@@ -239,90 +239,115 @@ export const getAllSchedules = async (req: Request, res: Response) => {
             });
         }
 
-        const { status, planType, taskId, dateFrom, dateTo, search } = validation.data!;
+        const { status, planType, taskId, dateFrom, dateTo, search, page = 1, limit = 20, sortBy = 'Sch_Id', sortOrder = 'DESC' } = validation.data!;
+        
+        const offset = (page - 1) * limit;
 
         let whereConditions = ['s.Sch_Del_Flag = 0'];
-        const replacements: any = {};
-        let paramCounter = 1;
+        const replacements: any[] = [];
 
         if (search) {
-            whereConditions.push(`(s.Sch_No LIKE @${paramCounter} OR t.Task_Name LIKE @${paramCounter})`);
-            replacements[paramCounter] = `%${search}%`;
-            paramCounter++;
+            whereConditions.push(`(s.Sch_No LIKE ? OR t.Task_Name LIKE ?)`);
+            replacements.push(`%${search}%`, `%${search}%`);
         }
         if (status !== undefined) {
-            whereConditions.push(`s.Sch_Status = @${paramCounter}`);
-            replacements[paramCounter] = status;
-            paramCounter++;
+            whereConditions.push(`s.Sch_Status = ?`);
+            replacements.push(status);
         }
         if (planType) {
-            whereConditions.push(`s.Sch_Plan_Id = @${paramCounter}`);
-            replacements[paramCounter] = planType;
-            paramCounter++;
+            whereConditions.push(`s.Sch_Plan_Id = ?`);
+            replacements.push(planType);
         }
         if (taskId) {
-            whereConditions.push(`s.Task_Id = @${paramCounter}`);
-            replacements[paramCounter] = taskId;
-            paramCounter++;
+            whereConditions.push(`s.Task_Id = ?`);
+            replacements.push(taskId);
         }
         if (dateFrom) {
-            whereConditions.push(`s.Sch_Date >= @${paramCounter}`);
-            replacements[paramCounter] = formatDateForSQL(dateFrom);
-            paramCounter++;
+            whereConditions.push(`s.Sch_Date >= ?`);
+            replacements.push(formatDateForSQL(dateFrom));
         }
         if (dateTo) {
-            whereConditions.push(`s.Sch_Date <= @${paramCounter}`);
-            replacements[paramCounter] = formatDateForSQL(dateTo);
-            paramCounter++;
+            whereConditions.push(`s.Sch_Date <= ?`);
+            replacements.push(formatDateForSQL(dateTo));
         }
 
         const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
+        const countQuery = `
+            SELECT COUNT(*) as total
+            FROM tbl_Project_Schedule s
+            LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
+            ${whereClause}
+        `;
+
+        let sortColumn = 's.Sch_Id';
+        if (sortBy === 'Sch_No') sortColumn = 's.Sch_No';
+        else if (sortBy === 'Sch_Date') sortColumn = 's.Sch_Date';
+        else if (sortBy === 'Task_Name') sortColumn = 't.Task_Name';
+        else if (sortBy === 'Sch_Status') sortColumn = 's.Sch_Status';
+        else if (sortBy === 'Entry_Date') sortColumn = 's.Entry_Date';
+
+        const orderClause = `ORDER BY ${sortColumn} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
+
         const schedulesQuery = `
+            WITH TaskCounts AS (
+                SELECT Sch_Id, COUNT(DISTINCT Emp_Id) as empCount
+                FROM tbl_Task_Details
+                GROUP BY Sch_Id
+            )
             SELECT
-                s.Sch_Id, s.Sch_No, s.Sch_Date, s.Task_Id, t.Task_Name,
-                s.Task_Type_Id, s.Sch_Plan_Id, p.Plan_Type,
-                s.Sch_Type,
-                s.Sch_Start_Date, s.Sch_End_Date, s.Task_Sch_Timer_Based,
-                s.Sch_Est_Start_Time, s.Sch_Est_End_Time, s.Task_Sch_Duaration,
-                s.Sch_Status, s.Entry_By, s.Entry_Date, s.Update_By, s.Update_Date,
-                s.Sch_Comp_Date,
-                pm.Project_Name, pm.Project_Id
+                s.*, t.Task_Name, p.Plan_Type,
+                pm.Project_Name, pm.Project_Id,
+                COALESCE(tc.empCount, 0) as empCount
             FROM tbl_Project_Schedule s
             LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
             LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
             LEFT JOIN tbl_Sch_Plan p ON s.Sch_Plan_Id = p.Plan_Id
+            LEFT JOIN TaskCounts tc ON s.Sch_Id = tc.Sch_Id
             ${whereClause}
-            ORDER BY s.Sch_Id DESC
+            ${orderClause}
+            OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
         `;
 
-        const schedules = await db.query(schedulesQuery, { replacements, type: QueryTypes.SELECT }) as any[];
+        const [countResult, schedules] = await Promise.all([
+            db.query(countQuery, { replacements, type: QueryTypes.SELECT }) as Promise<any[]>,
+            db.query(schedulesQuery, { replacements, type: QueryTypes.SELECT }) as Promise<any[]>
+        ]);
+
+        const totalRecords = countResult[0]?.total || 0;
+        const totalPages = Math.ceil(totalRecords / limit);
 
         if (schedules.length === 0) {
             return res.status(200).json({
                 success: true,
                 message: 'Project schedules retrieved successfully',
                 data: [],
-                total: 0
+                total: 0,
+                totalPages: 0
             });
         }
+        
+        const scheduleIds = schedules.map(s => s.Sch_Id);
+        const scheduleIdsStr = scheduleIds.join(',');
 
-        const scheduleIds = schedules.map((s: any) => s.Sch_Id);
-
+        // Optimize child queries by filtering using IN clause for paginated schedule IDs
         const taskDatesQuery = `
-            SELECT A_Id, Sch_Id, Task_Work_Date, Task_Start_Time, Task_End_Time
-            FROM tbl_Project_Sch_Task_DT
-            WHERE Sch_Id IN (${scheduleIds.map(() => '?').join(',')})
-            ORDER BY Sch_Id, Task_Work_Date
+            SELECT dt.A_Id, dt.Sch_Id, dt.Task_Work_Date, dt.Task_Start_Time, dt.Task_End_Time
+            FROM tbl_Project_Sch_Task_DT dt
+            WHERE dt.Sch_Id IN (${scheduleIdsStr})
+            ORDER BY dt.Sch_Id, dt.Task_Work_Date
         `;
-        const taskDates = await db.query(taskDatesQuery, { replacements: scheduleIds, type: QueryTypes.SELECT }) as any[];
 
         const planDetailsQuery = `
-            SELECT Sch_Id, Plan_Month, Plan_Day
-            FROM tbl_Project_Sch_DT
-            WHERE Sch_Id IN (${scheduleIds.map(() => '?').join(',')})
+            SELECT pd.Sch_Id, pd.Plan_Month, pd.Plan_Day
+            FROM tbl_Project_Sch_DT pd
+            WHERE pd.Sch_Id IN (${scheduleIdsStr})
         `;
-        const planDetails = await db.query(planDetailsQuery, { replacements: scheduleIds, type: QueryTypes.SELECT }) as any[];
+
+        const [taskDates, planDetails] = await Promise.all([
+            db.query(taskDatesQuery, { type: QueryTypes.SELECT }) as Promise<any[]>,
+            db.query(planDetailsQuery, { type: QueryTypes.SELECT }) as Promise<any[]>
+        ]);
 
         const taskDatesByScheduleId: { [key: number]: any[] } = {};
         const planDetailsByScheduleId: { [key: number]: any[] } = {};
@@ -364,6 +389,7 @@ export const getAllSchedules = async (req: Request, res: Response) => {
             schEstEndTime: schedule.Sch_Est_End_Time,
             taskSchDuration: schedule.Task_Sch_Duaration,
             schStatus: schedule.Sch_Status,
+            empCount: schedule.empCount,
             schCompDate: schedule.Sch_Comp_Date,
             entryBy: schedule.Entry_By,
             entryDate: schedule.Entry_Date,
@@ -377,7 +403,8 @@ export const getAllSchedules = async (req: Request, res: Response) => {
             success: true,
             message: 'Project schedules retrieved successfully',
             data: formattedSchedules,
-            total: schedules.length
+            total: totalRecords,
+            totalPages: totalPages
         });
     } catch (e) {
         console.error('Error in getAllSchedules:', e);
@@ -441,6 +468,249 @@ export const getScheduleDetails = async (req: Request, res: Response) => {
     }
 };
 
+// export const createSchedule = async (req: Request, res: Response) => {
+//     let transaction: Transaction | null = null;
+//     let isTransactionActive = false;
+
+//     try {
+//         const db = getDb(req);
+//         const currentDBName = getCurrentDatabaseName(req);
+//         console.log(`📊 Creating schedule in database: ${currentDBName}`);
+//         console.log('Create Schedule Request Body:', JSON.stringify(req.body, null, 2));
+
+//         const body = {
+//             ...req.body,
+//             Sch_No: req.body.Sch_No?.trim(),
+//             Sch_Status: req.body.Sch_Status || 1
+//         };
+
+//         const validation = validateWithZod<ScheduleCreate>(ScheduleCreateSchema, body);
+//         if (!validation.success) {
+//             console.log('Validation Errors:', JSON.stringify(validation.errors, null, 2));
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Validation failed',
+//                 errors: validation.errors
+//             });
+//         }
+
+//         const {
+//             Sch_No,
+//             Sch_Date,
+//             Task_Id,
+//             Task_Type_Id,
+//             Sch_Plan_Id,
+//             Sch_Type,
+//             Task_Sch_Timer_Based,
+//             Sch_Est_Start_Time,
+//             Sch_Est_End_Time,
+//             Task_Sch_Duaration,
+//             Sch_Status,
+//             Entry_By,
+//             planDetails,
+//             selectedDays,
+//             specificDates
+//         } = validation.data!;
+
+//         // Default values from frontend
+//         let Sch_Start_Date = validation.data!.Sch_Start_Date;
+//         let Sch_End_Date = validation.data!.Sch_End_Date;
+
+//         // PLAN 5 => AUTO SET START/END DATE FROM specificDates
+//         if (
+//             Sch_Plan_Id === 5 &&
+//             specificDates &&
+//             specificDates.length > 0
+//         ) {
+//             // Sort dates ascending (string sort works for YYYY-MM-DD format)
+//             const sortedDates = [...specificDates].sort();
+
+//             // First date = Start Date (convert string to Date)
+//             Sch_Start_Date = parseDateString(sortedDates[0]);
+
+//             // Last date = End Date (convert string to Date)
+//             Sch_End_Date = parseDateString(sortedDates[sortedDates.length - 1]);
+
+//             console.log('Plan 5 Auto Start Date:', Sch_Start_Date);
+//             console.log('Plan 5 Auto End Date:', Sch_End_Date);
+//         }
+
+//         // For Plan 5, we don't need to validate date range as we use specificDates
+//         if (Sch_Plan_Id !== 5) {
+//             const dateValidation = validateDateRange(Sch_Start_Date, Sch_End_Date);
+//             if (!dateValidation.valid) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     message: 'Validation failed',
+//                     errors: [{ field: 'Sch_End_Date', message: dateValidation.message }]
+//                 });
+//             }
+//         }
+
+//         // Check for duplicate schedule number
+//         const dupCheck = await db.query(
+//             `SELECT 1 FROM tbl_Project_Schedule WHERE UPPER(Sch_No) = UPPER(?) AND Sch_Del_Flag = 0`,
+//             { replacements: [Sch_No], type: QueryTypes.SELECT }
+//         ) as any[];
+
+//         if (dupCheck.length) {
+//             return res.status(409).json({
+//                 success: false,
+//                 message: 'Schedule number already exists'
+//             });
+//         }
+
+//         // Get next schedule ID
+//         const maxIdResult = await db.query(
+//             `SELECT ISNULL(MAX(Sch_Id), 0) + 1 as NextId FROM tbl_Project_Schedule`,
+//             { type: QueryTypes.SELECT }
+//         ) as any[];
+
+//         const nextSchId = maxIdResult[0]?.NextId;
+//         if (!nextSchId) throw new Error('Failed to generate next Schedule ID');
+
+//         transaction = await db.transaction();
+//         isTransactionActive = true;
+
+//         try {
+//             // Insert main schedule record
+//             await db.query(
+//                 `INSERT INTO tbl_Project_Schedule
+//                  (Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
+//                   Sch_Type,
+//                   Sch_Start_Date, Sch_End_Date, Task_Sch_Timer_Based,
+//                   Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
+//                   Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date)
+//                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, ${Sch_Status === 3 ? 'GETDATE()' : 'NULL'})`,
+//                 {
+//                     replacements: [
+//                         nextSchId,
+//                         Sch_No,
+//                         formatDateForSQL(Sch_Date || new Date()),
+//                         Task_Id,
+//                         Task_Type_Id,
+//                         Sch_Plan_Id,
+//                         Sch_Type || 1,
+//                         formatDateForSQL(Sch_Start_Date),
+//                         formatDateForSQL(Sch_End_Date),
+//                         Task_Sch_Timer_Based ? 1 : 0,
+//                         Sch_Est_Start_Time,
+//                         Sch_Est_End_Time,
+//                         Task_Sch_Duaration,
+//                         Sch_Status,
+//                         Entry_By
+//                     ],
+//                     type: QueryTypes.INSERT,
+//                     transaction
+//                 }
+//             );
+
+//             // Insert plan detail rows for non-Plan 5 schedules
+//             if (Sch_Plan_Id !== 5) {
+//                 await insertPlanDetails(db, nextSchId, Sch_Plan_Id, selectedDays || [], planDetails, transaction);
+//             }
+
+//             // Generate task work dates
+//             let taskDatesToInsert: Date[] = [];
+
+//             if (Sch_Plan_Id === 5) {
+//                 // PLAN 5: SPECIFIC DATES - Use ONLY the specificDates array from frontend
+//                 console.log('Plan 5 - specificDates from frontend:', specificDates);
+                
+//                 if (specificDates && specificDates.length > 0) {
+//                     // IMPORTANT: Use ONLY the specificDates array, ignore Sch_Start_Date and Sch_End_Date
+//                     taskDatesToInsert = specificDates
+//                         .filter(ds => ds && /^\d{4}-\d{2}-\d{2}$/.test(ds))
+//                         .map(ds => parseDateString(ds));
+//                     console.log(`Plan 5: Using ${taskDatesToInsert.length} specific dates from frontend (IGNORING Sch_Start_Date/Sch_End_Date):`, 
+//                         taskDatesToInsert.map(d => formatDateForSQL(d)));
+//                 } else {
+//                     // Only fallback to Sch_Start_Date if NO specific dates provided at all
+//                     if (Sch_Start_Date) {
+//                         taskDatesToInsert = [new Date(Sch_Start_Date)];
+//                         console.log(`Plan 5: No specific dates provided, falling back to Sch_Start_Date: ${formatDateForSQL(Sch_Start_Date)}`);
+//                     } else {
+//                         console.warn(`Plan 5: No specific dates and no start date provided - no task dates will be created`);
+//                     }
+//                 }
+//             } 
+//             else if (Sch_Start_Date && Sch_End_Date) {
+//                 taskDatesToInsert = generateTaskDates(
+//                     new Date(Sch_Start_Date), 
+//                     new Date(Sch_End_Date),
+//                     Sch_Plan_Id, 
+//                     selectedDays || [], 
+//                     planDetails, 
+//                     specificDates || []
+//                 );
+//                 console.log(`Plan ${Sch_Plan_Id}: Generated ${taskDatesToInsert.length} task dates from range`);
+//             }
+
+//             if (taskDatesToInsert.length > 0) {
+//                 await insertTaskDates(db, nextSchId, taskDatesToInsert, Sch_Est_Start_Time, Sch_Est_End_Time, transaction);
+//                 console.log(`Inserted ${taskDatesToInsert.length} task dates for schedule ${nextSchId}`);
+//                 console.log(`Inserted dates:`, taskDatesToInsert.map(d => formatDateForSQL(d)));
+//             } else {
+//                 console.warn(`No task dates generated for schedule ${nextSchId}`);
+//             }
+
+//             await transaction.commit();
+//             isTransactionActive = false;
+//             transaction = null;
+
+//             // Return the newly created record
+//             const data = await db.query(
+//                 `SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
+//                  FROM tbl_Project_Schedule s
+//                  LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
+//                  LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
+//                  LEFT JOIN tbl_Sch_Plan p ON s.Sch_Plan_Id = p.Plan_Id
+//                  WHERE s.Sch_Id = ?`,
+//                 { replacements: [nextSchId], type: QueryTypes.SELECT }
+//             ) as any[];
+
+//             const taskDatesResult = await db.query(
+//                 `SELECT * FROM tbl_Project_Sch_Task_DT WHERE Sch_Id = ? ORDER BY Task_Work_Date`,
+//                 { replacements: [nextSchId], type: QueryTypes.SELECT }
+//             ) as any[];
+
+//             const planDt = Sch_Plan_Id !== 5 ? await db.query(
+//                 `SELECT * FROM tbl_Project_Sch_DT WHERE Sch_Id = ?`,
+//                 { replacements: [nextSchId], type: QueryTypes.SELECT }
+//             ) as any[] : [];
+
+//             console.log('Final task dates saved to tbl_Project_Sch_Task_DT:', taskDatesResult.map(t => t.Task_Work_Date));
+//             console.log('Final schedule saved to tbl_Project_Schedule:', data[0]?.Sch_Id, data[0]?.Sch_No);
+
+//             return created(res, {
+//                 ...data[0],
+//                 taskDates: taskDatesResult,
+//                 planDetails: planDt
+//             }, 'Project schedule created successfully');
+
+//         } catch (error) {
+//             console.error('Error during transaction operations:', error);
+//             if (transaction && isTransactionActive) {
+//                 try { await transaction.rollback(); isTransactionActive = false; } catch (e) { console.error('Rollback error:', e); }
+//             }
+//             throw error;
+//         }
+
+//     } catch (e) {
+//         console.error('Create Schedule Error:', e);
+//         if (transaction && isTransactionActive) {
+//             try { await transaction.rollback(); isTransactionActive = false; } catch (err) { console.error('Final rollback error:', err); }
+//         }
+//         return res.status(500).json({
+//             success: false,
+//             message: 'Failed to create schedule',
+//             error: e instanceof Error ? e.message : 'Unknown error',
+//             stack: process.env.NODE_ENV === 'development' ? (e instanceof Error ? e.stack : undefined) : undefined
+//         });
+//     }
+// };
+
+
 export const createSchedule = async (req: Request, res: Response) => {
     let transaction: Transaction | null = null;
     let isTransactionActive = false;
@@ -485,30 +755,28 @@ export const createSchedule = async (req: Request, res: Response) => {
             specificDates
         } = validation.data!;
 
-        // Default values from frontend
         let Sch_Start_Date = validation.data!.Sch_Start_Date;
         let Sch_End_Date = validation.data!.Sch_End_Date;
 
         // PLAN 5 => AUTO SET START/END DATE FROM specificDates
-        if (
-            Sch_Plan_Id === 5 &&
-            specificDates &&
-            specificDates.length > 0
-        ) {
-            // Sort dates ascending (string sort works for YYYY-MM-DD format)
+        if (Sch_Plan_Id === 5 && specificDates && specificDates.length > 0) {
             const sortedDates = [...specificDates].sort();
 
-            // First date = Start Date (convert string to Date)
-            Sch_Start_Date = parseDateString(sortedDates[0]);
-
-            // Last date = End Date (convert string to Date)
-            Sch_End_Date = parseDateString(sortedDates[sortedDates.length - 1]);
+            try {
+                Sch_Start_Date = parseDateString(sortedDates[0]);
+                Sch_End_Date = parseDateString(sortedDates[sortedDates.length - 1]);
+            } catch (parseErr) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Validation failed',
+                    errors: [{ field: 'specificDates', message: 'One or more specific dates are invalid' }]
+                });
+            }
 
             console.log('Plan 5 Auto Start Date:', Sch_Start_Date);
             console.log('Plan 5 Auto End Date:', Sch_End_Date);
         }
 
-        // For Plan 5, we don't need to validate date range as we use specificDates
         if (Sch_Plan_Id !== 5) {
             const dateValidation = validateDateRange(Sch_Start_Date, Sch_End_Date);
             if (!dateValidation.valid) {
@@ -533,20 +801,34 @@ export const createSchedule = async (req: Request, res: Response) => {
             });
         }
 
-        // Get next schedule ID
-        const maxIdResult = await db.query(
-            `SELECT ISNULL(MAX(Sch_Id), 0) + 1 as NextId FROM tbl_Project_Schedule`,
-            { type: QueryTypes.SELECT }
-        ) as any[];
-
-        const nextSchId = maxIdResult[0]?.NextId;
-        if (!nextSchId) throw new Error('Failed to generate next Schedule ID');
+        // Safe defaults so `undefined` never hits the SQL driver
+        const safeSchType = Sch_Type ?? 1;
+        const safeTimerBased = Task_Sch_Timer_Based ? 1 : 0;
+        const safeEstStart = Sch_Est_Start_Time ?? null;
+        const safeEstEnd = Sch_Est_End_Time ?? null;
+        const safeDuration = Task_Sch_Duaration ?? null;
+        const safeEntryBy = Entry_By ?? null;
 
         transaction = await db.transaction();
         isTransactionActive = true;
 
         try {
-            // Insert main schedule record
+            // Generate next Schedule ID INSIDE the transaction with a table lock,
+            // to avoid two concurrent requests computing the same MAX(Sch_Id)+1.
+            const maxIdResult = await db.query(
+                `SELECT ISNULL(MAX(Sch_Id), 0) + 1 as NextId
+                 FROM tbl_Project_Schedule WITH (TABLOCKX, HOLDLOCK)`,
+                { type: QueryTypes.SELECT, transaction }
+            ) as any[];
+
+            const nextSchId = maxIdResult[0]?.NextId;
+            if (!nextSchId) throw new Error('Failed to generate next Schedule ID');
+
+            // Columns (18): Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
+            // Sch_Type, Sch_Start_Date, Sch_End_Date, Task_Sch_Timer_Based,
+            // Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration, Sch_Status,
+            // Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date
+            // Placeholders (15) + GETDATE() + 0 + Sch_Comp_Date expr = 18
             await db.query(
                 `INSERT INTO tbl_Project_Schedule
                  (Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
@@ -563,15 +845,15 @@ export const createSchedule = async (req: Request, res: Response) => {
                         Task_Id,
                         Task_Type_Id,
                         Sch_Plan_Id,
-                        Sch_Type || 1,
+                        safeSchType,
                         formatDateForSQL(Sch_Start_Date),
                         formatDateForSQL(Sch_End_Date),
-                        Task_Sch_Timer_Based ? 1 : 0,
-                        Sch_Est_Start_Time,
-                        Sch_Est_End_Time,
-                        Task_Sch_Duaration,
+                        safeTimerBased,
+                        safeEstStart,
+                        safeEstEnd,
+                        safeDuration,
                         Sch_Status,
-                        Entry_By
+                        safeEntryBy
                     ],
                     type: QueryTypes.INSERT,
                     transaction
@@ -587,40 +869,36 @@ export const createSchedule = async (req: Request, res: Response) => {
             let taskDatesToInsert: Date[] = [];
 
             if (Sch_Plan_Id === 5) {
-                // PLAN 5: SPECIFIC DATES - Use ONLY the specificDates array from frontend
                 console.log('Plan 5 - specificDates from frontend:', specificDates);
-                
+
                 if (specificDates && specificDates.length > 0) {
-                    // IMPORTANT: Use ONLY the specificDates array, ignore Sch_Start_Date and Sch_End_Date
                     taskDatesToInsert = specificDates
                         .filter(ds => ds && /^\d{4}-\d{2}-\d{2}$/.test(ds))
                         .map(ds => parseDateString(ds));
-                    console.log(`Plan 5: Using ${taskDatesToInsert.length} specific dates from frontend (IGNORING Sch_Start_Date/Sch_End_Date):`, 
-                        taskDatesToInsert.map(d => formatDateForSQL(d)));
+                    console.log(
+                        `Plan 5: Using ${taskDatesToInsert.length} specific dates from frontend (IGNORING Sch_Start_Date/Sch_End_Date):`,
+                        taskDatesToInsert.map(d => formatDateForSQL(d))
+                    );
+                } else if (Sch_Start_Date) {
+                    taskDatesToInsert = [new Date(Sch_Start_Date)];
+                    console.log(`Plan 5: No specific dates provided, falling back to Sch_Start_Date: ${formatDateForSQL(Sch_Start_Date)}`);
                 } else {
-                    // Only fallback to Sch_Start_Date if NO specific dates provided at all
-                    if (Sch_Start_Date) {
-                        taskDatesToInsert = [new Date(Sch_Start_Date)];
-                        console.log(`Plan 5: No specific dates provided, falling back to Sch_Start_Date: ${formatDateForSQL(Sch_Start_Date)}`);
-                    } else {
-                        console.warn(`Plan 5: No specific dates and no start date provided - no task dates will be created`);
-                    }
+                    console.warn(`Plan 5: No specific dates and no start date provided - no task dates will be created`);
                 }
-            } 
-            else if (Sch_Start_Date && Sch_End_Date) {
+            } else if (Sch_Start_Date && Sch_End_Date) {
                 taskDatesToInsert = generateTaskDates(
-                    new Date(Sch_Start_Date), 
+                    new Date(Sch_Start_Date),
                     new Date(Sch_End_Date),
-                    Sch_Plan_Id, 
-                    selectedDays || [], 
-                    planDetails, 
+                    Sch_Plan_Id,
+                    selectedDays || [],
+                    planDetails,
                     specificDates || []
                 );
                 console.log(`Plan ${Sch_Plan_Id}: Generated ${taskDatesToInsert.length} task dates from range`);
             }
 
             if (taskDatesToInsert.length > 0) {
-                await insertTaskDates(db, nextSchId, taskDatesToInsert, Sch_Est_Start_Time, Sch_Est_End_Time, transaction);
+                await insertTaskDates(db, nextSchId, taskDatesToInsert, safeEstStart, safeEstEnd, transaction);
                 console.log(`Inserted ${taskDatesToInsert.length} task dates for schedule ${nextSchId}`);
                 console.log(`Inserted dates:`, taskDatesToInsert.map(d => formatDateForSQL(d)));
             } else {
@@ -631,7 +909,6 @@ export const createSchedule = async (req: Request, res: Response) => {
             isTransactionActive = false;
             transaction = null;
 
-            // Return the newly created record
             const data = await db.query(
                 `SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
                  FROM tbl_Project_Schedule s
@@ -647,10 +924,12 @@ export const createSchedule = async (req: Request, res: Response) => {
                 { replacements: [nextSchId], type: QueryTypes.SELECT }
             ) as any[];
 
-            const planDt = Sch_Plan_Id !== 5 ? await db.query(
-                `SELECT * FROM tbl_Project_Sch_DT WHERE Sch_Id = ?`,
-                { replacements: [nextSchId], type: QueryTypes.SELECT }
-            ) as any[] : [];
+            const planDt = Sch_Plan_Id !== 5
+                ? await db.query(
+                    `SELECT * FROM tbl_Project_Sch_DT WHERE Sch_Id = ?`,
+                    { replacements: [nextSchId], type: QueryTypes.SELECT }
+                ) as any[]
+                : [];
 
             console.log('Final task dates saved to tbl_Project_Sch_Task_DT:', taskDatesResult.map(t => t.Task_Work_Date));
             console.log('Final schedule saved to tbl_Project_Schedule:', data[0]?.Sch_Id, data[0]?.Sch_No);
@@ -662,7 +941,10 @@ export const createSchedule = async (req: Request, res: Response) => {
             }, 'Project schedule created successfully');
 
         } catch (error) {
-            console.error('Error during transaction operations:', error);
+            console.error('Error during transaction operations (raw):', error);
+            const original = (error as any)?.original ?? (error as any)?.parent;
+            console.error('Error during transaction operations (driver detail):', original);
+
             if (transaction && isTransactionActive) {
                 try { await transaction.rollback(); isTransactionActive = false; } catch (e) { console.error('Rollback error:', e); }
             }
@@ -670,18 +952,39 @@ export const createSchedule = async (req: Request, res: Response) => {
         }
 
     } catch (e) {
-        console.error('Create Schedule Error:', e);
+        console.error('Create Schedule Error (raw):', e);
+
+        // Sequelize wraps the actual SQL Server/tedious error inside .original or .parent
+        const original = (e as any)?.original ?? (e as any)?.parent;
+        console.error('Create Schedule Error (driver detail):', original);
+
         if (transaction && isTransactionActive) {
             try { await transaction.rollback(); isTransactionActive = false; } catch (err) { console.error('Final rollback error:', err); }
         }
+
+        const resolvedMessage =
+            (e instanceof Error && e.message) ||
+            original?.message ||
+            original?.originalError?.info?.message ||
+            (original ? JSON.stringify(original) : null) ||
+            'Unknown error';
+
         return res.status(500).json({
             success: false,
             message: 'Failed to create schedule',
-            error: e instanceof Error ? e.message : 'Unknown error',
+            error: resolvedMessage,
+            sqlError: original ? {
+                number: original.number,
+                state: original.state,
+                class: original.class,
+                lineNumber: original.lineNumber,
+                procName: original.procName
+            } : undefined,
             stack: process.env.NODE_ENV === 'development' ? (e instanceof Error ? e.stack : undefined) : undefined
         });
     }
 };
+
 
 export const updateSchedule = async (req: Request, res: Response) => {
     let transaction: Transaction | null = null;

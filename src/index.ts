@@ -1,5 +1,6 @@
 // src/index.ts
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
@@ -24,9 +25,10 @@ const PORT = process.env.PORT || 5001;
 // ─── Core middleware ─────────────────────────────────────────────────────────
 
 app.use(cors({ origin: '*', credentials: true }));
+app.use(compression({ threshold: 512 })); // compress responses > 512 bytes
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(morgan('dev'));
+app.use(morgan(':method :url :status :response-time ms'));
 
 // Request logger (omits passwords)
 app.use((req, _res, next) => {
@@ -177,7 +179,7 @@ process.on('unhandledRejection', (r, p) => { console.error('❌ unhandledRejecti
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log('\n' + '='.repeat(60));
     console.log('🚀 Server running');
     console.log(`📍 http://localhost:${PORT}`);
@@ -185,5 +187,10 @@ app.listen(PORT, () => {
     console.log(`❤️  Health: http://localhost:${PORT}/health`);
     console.log('='.repeat(60) + '\n');
 });
+
+// Keep HTTP connections alive for reuse (reduces TCP handshake overhead)
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 70000;
+
 
 export default app;

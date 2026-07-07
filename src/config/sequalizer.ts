@@ -423,17 +423,10 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
 
     if (!config) throw new Error(`No DB configuration found for: ${identifier}`);
 
-    // Return healthy cached connection
+    // Return cached connection immediately (connection pool handles health checks)
     if (companyConnections.has(cacheKey)) {
         const existing = companyConnections.get(cacheKey)!;
-        try {
-            await existing.authenticate();
-            console.log(`♻️  Reusing connection: ${config.database}`);
-            return existing;
-        } catch {
-            console.warn(`🔄 Stale connection for ${config.database}, reconnecting…`);
-            companyConnections.delete(cacheKey);
-        }
+        return existing;
     }
 
     // Human-readable address for logs

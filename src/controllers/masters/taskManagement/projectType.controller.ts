@@ -116,13 +116,33 @@ export const getAllProjects = async (req: Request, res: Response) => {
             whereClause.Company_Id = user.currentCompanyId;
         }
 
-        const { rows: projects } = await Project.findAndCountAll({
-            where: whereClause,
-            order: [['Project_Id', 'DESC']]
+        // Use raw query for performance on large datasets
+        const sequelize = (req as any).companyDB;
+        let whereStr = '1=1';
+        const replacements: any = {};
+        
+        if (user && user.currentCompanyId) {
+            whereStr += ' AND Company_Id = :companyId';
+            replacements.companyId = user.currentCompanyId;
+        }
+
+        const rawQuery = `
+            SELECT * FROM tbl_Project_Master WITH (NOLOCK)
+            WHERE ${whereStr}
+            ORDER BY Project_Id DESC
+        `;
+        
+        const projects = await sequelize.query(rawQuery, {
+            replacements,
+            type: sequelize.QueryTypes?.SELECT || 'SELECT'
         });
 
         // Format projects with status text
-        const formattedProjects = projects.map(project => formatProjectForResponse(project));
+        const formattedProjects = projects.map((project: any) => ({
+            ...project,
+            statusText: getStatusText(project.IsActive),
+            projectStatusText: getProjectStatusText(project.Project_Status)
+        }));
 
         return res.status(200).json({
             success: true,

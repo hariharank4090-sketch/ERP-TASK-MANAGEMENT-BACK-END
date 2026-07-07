@@ -128,7 +128,7 @@ export function notFound(
     message = 'Not Found',
     others: Others = {}
 ): Response<ApiResponse> {
-    return res.status(404).json({
+    return res.status(200).json({
         data: [],
         message,
         success: false,

@@ -100,7 +100,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     if (requiredPermission === 'update_task_parameters' && ![1, 2].includes(user.UserTypeId)) {
         return false;
     }
-    if (requiredPermission === 'delete_task_parameters' && user.UserTypeId !== 1) {
+    if (requiredPermission === 'delete_task_parameters' && ![1, 2].includes(user.UserTypeId)) {
         return false;
     }
     if (requiredPermission === 'view_task_parameters' && ![1, 2, 3].includes(user.UserTypeId)) {
@@ -168,6 +168,17 @@ export const getAllTaskParametDTs = async (req: Request, res: Response) => {
             if (sequelize) {
                 // Get joined data with parameter names
                 const ids = taskParametDTs.map(t => t.PA_Id);
+                let orderByClause = `td.PA_Id ${orderDirection}`;
+                if (orderField === 'Paramet_Name') {
+                    orderByClause = `pm.Paramet_Name ${orderDirection}`;
+                } else if (orderField === 'Para_Display_Name') {
+                    orderByClause = `pdt.Para_Display_Name ${orderDirection}`;
+                } else if (orderField === 'Task_Id') {
+                    orderByClause = `td.Task_Id ${orderDirection}`;
+                } else if (orderField === 'Param_Id') {
+                    orderByClause = `td.Param_Id ${orderDirection}`;
+                }
+
                 const joinedQuery = `
                     SELECT 
                         td.PA_Id,
@@ -178,24 +189,12 @@ export const getAllTaskParametDTs = async (req: Request, res: Response) => {
                         pdt.Para_Display_Name
                     FROM tbl_Task_Paramet_DT td
                     LEFT JOIN tbl_Paramet_Master pm ON td.Param_Id = pm.Paramet_Id AND (pm.Del_Flag = 0 OR pm.Del_Flag IS NULL)
-                    LEFT JOIN tbl_Paramet_Data_Type pdt ON td.Paramet_Data_Type = pdt.Para_Data_Type_Id
+                    LEFT JOIN tbl_Paramet_Data_Type pdt ON TRY_CAST(td.Paramet_Data_Type AS INT) = pdt.Para_Data_Type_Id
                     WHERE td.PA_Id IN (${ids.join(',')})
-                    ORDER BY 
-                        CASE 
-                            WHEN ? = 'Paramet_Name' THEN pm.Paramet_Name
-                            WHEN ? = 'Para_Display_Name' THEN pdt.Para_Display_Name
-                            ELSE 
-                                CASE ?
-                                    WHEN 'PA_Id' THEN td.PA_Id
-                                    WHEN 'Task_Id' THEN td.Task_Id
-                                    WHEN 'Param_Id' THEN td.Param_Id
-                                    ELSE td.PA_Id
-                                END
-                        END ${orderDirection}
+                    ORDER BY ${orderByClause}
                 `;
                 
                 const joinedResults = await sequelize.query(joinedQuery, {
-                    replacements: [orderField, orderField, orderField],
                     type: 'SELECT'
                 }) as TaskParametDTWithDetails[];
                 
@@ -255,7 +254,7 @@ export const getTaskParametDTById = async (req: Request, res: Response) => {
                     pdt.Para_Display_Name
                 FROM tbl_Task_Paramet_DT td
                 LEFT JOIN tbl_Paramet_Master pm ON td.Param_Id = pm.Paramet_Id AND (pm.Del_Flag = 0 OR pm.Del_Flag IS NULL)
-                LEFT JOIN tbl_Paramet_Data_Type pdt ON td.Paramet_Data_Type = pdt.Para_Data_Type_Id
+                LEFT JOIN tbl_Paramet_Data_Type pdt ON TRY_CAST(td.Paramet_Data_Type AS INT) = pdt.Para_Data_Type_Id
                 WHERE td.PA_Id = ?
             `;
             
@@ -320,7 +319,7 @@ export const getTaskParametDTsByTaskId = async (req: Request, res: Response) => 
                     pdt.Para_Display_Name
                 FROM tbl_Task_Paramet_DT td
                 LEFT JOIN tbl_Paramet_Master pm ON td.Param_Id = pm.Paramet_Id AND (pm.Del_Flag = 0 OR pm.Del_Flag IS NULL)
-                LEFT JOIN tbl_Paramet_Data_Type pdt ON td.Paramet_Data_Type = pdt.Para_Data_Type_Id
+                LEFT JOIN tbl_Paramet_Data_Type pdt ON TRY_CAST(td.Paramet_Data_Type AS INT) = pdt.Para_Data_Type_Id
                 WHERE td.Task_Id = ?
                 ORDER BY td.Param_Id ASC
             `;
@@ -374,11 +373,15 @@ export const createTaskParametDT = async (req: Request, res: Response) => {
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             
+            const parametDataType = item.Paramet_Data_Type !== undefined && item.Paramet_Data_Type !== null 
+                ? String(item.Paramet_Data_Type).trim() 
+                : null;
+            
             const normalizedBody = {
                 ...item,
                 Task_Id: item.Task_Id,
                 Param_Id: item.Param_Id,
-                Paramet_Data_Type: item.Paramet_Data_Type?.trim() || null
+                Paramet_Data_Type: parametDataType === '' ? null : parametDataType
             };
 
             // Validate with Zod
@@ -433,7 +436,7 @@ export const createTaskParametDT = async (req: Request, res: Response) => {
                             pdt.Para_Display_Name
                         FROM tbl_Task_Paramet_DT td
                         LEFT JOIN tbl_Paramet_Master pm ON td.Param_Id = pm.Paramet_Id AND (pm.Del_Flag = 0 OR pm.Del_Flag IS NULL)
-                        LEFT JOIN tbl_Paramet_Data_Type pdt ON td.Paramet_Data_Type = pdt.Para_Data_Type_Id
+                        LEFT JOIN tbl_Paramet_Data_Type pdt ON TRY_CAST(td.Paramet_Data_Type AS INT) = pdt.Para_Data_Type_Id
                         WHERE td.PA_Id = ?
                     `;
                     
@@ -594,7 +597,7 @@ export const updateTaskParametDT = async (req: Request, res: Response) => {
                     pdt.Para_Display_Name
                 FROM tbl_Task_Paramet_DT td
                 LEFT JOIN tbl_Paramet_Master pm ON td.Param_Id = pm.Paramet_Id AND (pm.Del_Flag = 0 OR pm.Del_Flag IS NULL)
-                LEFT JOIN tbl_Paramet_Data_Type pdt ON td.Paramet_Data_Type = pdt.Para_Data_Type_Id
+                LEFT JOIN tbl_Paramet_Data_Type pdt ON TRY_CAST(td.Paramet_Data_Type AS INT) = pdt.Para_Data_Type_Id
                 WHERE td.PA_Id = ?
             `;
             

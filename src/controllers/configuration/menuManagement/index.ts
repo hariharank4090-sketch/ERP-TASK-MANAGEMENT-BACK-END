@@ -304,14 +304,8 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
         // Check cache
         if (userPortalConnections.has(companyId)) {
             const cached = userPortalConnections.get(companyId)!;
-            try {
-                await cached.authenticate();
-                console.log(`♻️ Reusing User Portal connection for company ${companyId}`);
-                return cached;
-            } catch (error) {
-                console.log(`Stale User Portal connection for company ${companyId}, reconnecting...`);
-                userPortalConnections.delete(companyId);
-            }
+            console.log(`♻️ Reusing User Portal connection for company ${companyId}`);
+            return cached;
         }
         
         // Get raw company configuration
@@ -347,7 +341,7 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
             user: companyRawConfig.user
         });
         
-        // Create connection to User_Portal database on company's host
+        const baseOpts = buildDialectOptions(h.instance, h.port);
         const userPortalConnection = new Sequelize({
             dialect: 'mssql',
             host: h.server,
@@ -356,8 +350,32 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
             password: companyRawConfig.password,
             database: 'User_Portal',
             logging: false,
-            dialectOptions: buildDialectOptions(h.instance, h.port),
-            pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
+            dialectOptions: {
+                ...baseOpts,
+                options: {
+                    ...baseOpts.options,
+                    connectionTimeout: 300
+                }
+            },
+            // Aggressive idle timeout (1s) to prevent firewall dropping stale connections 
+            // and causing 21s ECONNRESET hangs when pulled from the pool.
+            pool: { max: 10, min: 0, acquire: 30000, idle: 1000, evict: 1000 },
+            retry: {
+                match: [
+                    /ECONNRESET/,
+                    /ConnectionError/,
+                    /SequelizeConnectionError/,
+                    /SequelizeConnectionRefusedError/,
+                    /SequelizeHostNotFoundError/,
+                    /SequelizeHostNotReachableError/,
+                    /SequelizeInvalidConnectionError/,
+                    /SequelizeConnectionAcquireTimeoutError/,
+                    /ETIMEOUT/,
+                    /EINVALIDSTATE/,
+                    /LoggedIn state/
+                ],
+                max: 3
+            }
         });
         
         await userPortalConnection.authenticate();
@@ -405,9 +423,11 @@ const getUserInfoFromToken = async (token: string | null): Promise<UserInfo | nu
 
 const getUserMenuRights = async (token: string | null): Promise<MenuRow[] | false> => {
     try {
-        const userInfo = await getUserInfoFromToken(token);
-        const companyDB = await getCompanyDB(token);
-        const portalDB = await getUserPortalViaCompanyHost(token);
+        const [userInfo, companyDB, portalDB] = await Promise.all([
+            getUserInfoFromToken(token),
+            getCompanyDB(token),
+            getUserPortalViaCompanyHost(token)
+        ]);
 
         // Admin / management → full rights
         if (userInfo && (isEqualNumber(userInfo.userTypeId, 0) || isEqualNumber(userInfo.userTypeId, 1))) {
@@ -424,27 +444,17 @@ const getUserMenuRights = async (token: string | null): Promise<MenuRow[] | fals
             return rows;
         }
 
-        // Fetch menu from User_Portal via company host
-        const menus = await portalDB.query(
-            `SELECT * FROM tbl_AppMenu`,
-            { type: QueryTypes.SELECT }
-        ) as MenuRow[];
-
         // Use Local_User_ID for rights query
         const localUserId = userInfo ? userInfo.localUserId : null;
 
-        // Fetch user rights from company DB
-        let userRights: Array<{
-            MenuId: number;
-            Read_Rights: number;
-            Add_Rights: number;
-            Edit_Rights: number;
-            Delete_Rights: number;
-            Print_Rights: number;
-        }> = [];
-
-        if (localUserId) {
-            userRights = await companyDB.query(
+        // Run menu and rights queries in parallel
+        const [menus, userRights, userTypeRights] = await Promise.all([
+            portalDB.query(
+                `SELECT * FROM tbl_AppMenu`,
+                { type: QueryTypes.SELECT }
+            ) as Promise<MenuRow[]>,
+            
+            localUserId ? companyDB.query(
                 `SELECT
                     ur.MenuId,
                     ur.Read_Rights,
@@ -454,23 +464,22 @@ const getUserMenuRights = async (token: string | null): Promise<MenuRow[] | fals
                     ur.Print_Rights
                  FROM tbl_AppMenu_UserRights ur
                  WHERE ur.UserId = :localUserId`,
-                { replacements: { localUserId }, type: QueryTypes.SELECT },
-            ) as any[];
-        }
-
-        // Fetch user type rights from company DB
-        const userTypeRights = await companyDB.query(
-            `SELECT
-                utr.MenuId,
-                utr.Read_Rights,
-                utr.Add_Rights,
-                utr.Edit_Rights,
-                utr.Delete_Rights,
-                utr.Print_Rights
-             FROM tbl_AppMenu_UserTypeRights utr
-             WHERE utr.UserTypeId = :userTypeId`,
-            { replacements: { userTypeId: userInfo?.userTypeId || 0 }, type: QueryTypes.SELECT },
-        ) as any[];
+                { replacements: { localUserId }, type: QueryTypes.SELECT }
+            ) as Promise<any[]> : Promise.resolve([]),
+            
+            companyDB.query(
+                `SELECT
+                    utr.MenuId,
+                    utr.Read_Rights,
+                    utr.Add_Rights,
+                    utr.Edit_Rights,
+                    utr.Delete_Rights,
+                    utr.Print_Rights
+                 FROM tbl_AppMenu_UserTypeRights utr
+                 WHERE utr.UserTypeId = :userTypeId`,
+                { replacements: { userTypeId: userInfo?.userTypeId || 0 }, type: QueryTypes.SELECT }
+            ) as Promise<any[]>
+        ]);
 
         // Build lookup maps
         const urMap = new Map(userRights.map(r => [r.MenuId, r]));

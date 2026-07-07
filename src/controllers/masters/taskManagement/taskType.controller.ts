@@ -919,71 +919,46 @@ export const getTaskTypeDropdown = async (req: Request, res: Response) => {
         // Get query parameters for filtering
         const { projectId, includeInactive = 'false' } = req.query;
         
-        // Build where clause
-        const whereClause: any = {};
+        const sequelize = (req as any).companyDB;
         
-        // Always filter by TT_Del_Flag = 0 for dropdown by default
-        whereClause.TT_Del_Flag = 0;
+        let whereClauseStr = 'tt.TT_Del_Flag = 0';
+        const replacements: any = {};
         
-        // Add status filter (active only by default)
         if (includeInactive !== 'true') {
-            whereClause.Status = 1;
+            whereClauseStr += ' AND tt.Status = 1';
         }
         
-        // Filter by project ID if provided
         if (projectId && !isNaN(Number(projectId))) {
-            whereClause.Project_Id = Number(projectId);
+            whereClauseStr += ' AND tt.Project_Id = :projectId';
+            replacements.projectId = Number(projectId);
         }
-        
-        const taskTypes = await TaskType.findAll({
-            where: whereClause,
-            attributes: [
-                'Task_Type_Id',
-                'Task_Type',
-                'Is_Reptative',
-                'Hours_Duration',
-                'Day_Duration',
-                'TT_Del_Flag',
-                'Project_Id',
-                'Est_StartTime',
-                'Est_EndTime',
-                'Status'
-            ],
-            order: [['Task_Type', 'ASC']]
+
+        const rawQuery = `
+            SELECT 
+                tt.Task_Type_Id,
+                tt.Task_Type,
+                tt.Is_Reptative,
+                tt.Hours_Duration,
+                tt.Day_Duration,
+                tt.TT_Del_Flag,
+                tt.Project_Id,
+                tt.Est_StartTime,
+                tt.Est_EndTime,
+                tt.Status,
+                pm.Project_Name
+            FROM tbl_Task_Type tt WITH (NOLOCK)
+            LEFT JOIN tbl_Project_Master pm WITH (NOLOCK) ON tt.Project_Id = pm.Project_Id
+            WHERE ${whereClauseStr}
+            ORDER BY tt.Task_Type ASC
+        `;
+
+        const taskTypes = await sequelize.query(rawQuery, {
+            replacements,
+            type: sequelize.QueryTypes?.SELECT || 'SELECT'
         });
-        
-        // Get project names for task types
-        const projectIds: number[] = [];
-        taskTypes.forEach(tt => {
-            if (tt.Project_Id !== null && tt.Project_Id !== undefined) {
-                projectIds.push(tt.Project_Id);
-            }
-        });
-        
-        const uniqueProjectIds = [...new Set(projectIds)];
-        
-        const projectsMap = new Map<number, string>();
-        if (uniqueProjectIds.length > 0) {
-            const projects = await Project.findAll({
-                where: {
-                    Project_Id: uniqueProjectIds
-                },
-                attributes: ['Project_Id', 'Project_Name']
-            });
-            
-            projects.forEach(project => {
-                const projectIdValue = project.Project_Id;
-                const projectName = project.Project_Name;
-                if (projectName !== null && projectName !== undefined) {
-                    projectsMap.set(projectIdValue, projectName);
-                }
-            });
-        }
         
         // Format task types for dropdown response with proper null/undefined handling
-        const formattedTaskTypes = taskTypes.map(taskType => {
-            const plainTaskType = taskType.get({ plain: true });
-            
+        const formattedTaskTypes = taskTypes.map((plainTaskType: any) => {
             // Safely extract values with defaults
             const isReptativeValue = (plainTaskType.Is_Reptative !== null && plainTaskType.Is_Reptative !== undefined) ? plainTaskType.Is_Reptative : 0;
             const ttDelFlagValue = (plainTaskType.TT_Del_Flag !== null && plainTaskType.TT_Del_Flag !== undefined) ? plainTaskType.TT_Del_Flag : 0;
@@ -1003,7 +978,7 @@ export const getTaskTypeDropdown = async (req: Request, res: Response) => {
                 statusText: getStatusText(statusValue),
                 delFlagText: getDelFlagText(ttDelFlagValue),
                 isReptativeText: getReptativeText(isReptativeValue),
-                Project_Name: plainTaskType.Project_Id ? projectsMap.get(plainTaskType.Project_Id) || null : null
+                Project_Name: plainTaskType.Project_Name || null
             };
         });
         

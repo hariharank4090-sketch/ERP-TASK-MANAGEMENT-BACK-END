@@ -316,7 +316,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
             rawSortOrder && isValidSortOrder(rawSortOrder) ? rawSortOrder : 'DESC';
 
         // ── Build where clause with permission filtering ────────────────────
-        const whereClause: any = {};
+        const whereClause: any = { Del_Flag: { [Op.or]: [0, null] } };
 
         // Non-admin users see only records linked to their User_Mgt_Id
         if (!isAdminForCurrentCompany(req)) {
@@ -408,7 +408,7 @@ export const getEmployeeById = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'Valid employee ID is required' });
         }
 
-        const findFilter: any = { Emp_Id: id };
+        const findFilter: any = { Emp_Id: id, Del_Flag: { [Op.or]: [0, null] } };
         
         // Non-admin users can only see their own records
         if (!isAdminForCurrentCompany(req)) {
@@ -457,7 +457,7 @@ export const getEmployeeByCode = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'Employee code is required' });
         }
 
-        const findFilter: any = { Emp_Code: empCode.trim() };
+        const findFilter: any = { Emp_Code: empCode.trim(), Del_Flag: { [Op.or]: [0, null] } };
         
         if (!isAdminForCurrentCompany(req)) {
             const localUserId = getLocalUserIdForCurrentCompany(req);

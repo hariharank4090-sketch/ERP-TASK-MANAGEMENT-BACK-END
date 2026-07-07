@@ -400,6 +400,9 @@ const getSingleEmployeeAttendance = async (
             WHERE
                 COALESCE(u.isActive, 0) != 1
                 AND al.status != 'Resigned'
+                AND al.AttendanceDate >= CAST(:FromDate AS DATETIME)
+                AND al.AttendanceDate < CAST(:ToDate AS DATETIME)
+                AND em.User_Mgt_Id = :EmpCode
         ),
         DefaultLeaves AS (
             SELECT CAST(Date AS DATE) AS DefaultLeaveDate
@@ -423,6 +426,9 @@ const getSingleEmployeeAttendance = async (
             WHERE
                 al.status != 'Resigned'
                 AND ISNULL(CAST(al.PunchRecords AS NVARCHAR(MAX)), '') <> ''
+                AND al.AttendanceDate >= CAST(:FromDate AS DATETIME)
+                AND al.AttendanceDate < CAST(:ToDate AS DATETIME)
+                AND em.User_Mgt_Id = :EmpCode
             GROUP BY em.User_Mgt_Id, CAST(al.AttendanceDate AS DATE)
         ),
         LeaveDays AS (
@@ -494,6 +500,11 @@ const getMultipleEmployeesAttendance = async (
             ? ''
             : "AND em.fingerPrintEmpId = :FingerPrintId";
 
+    const punchFilterCondition =
+        !FingerPrintId || FingerPrintId === 'ALL' || FingerPrintId === '0'
+            ? ''
+            : "AND pd.EmployeeCode = :FingerPrintId";
+
     const query = `
  WITH RankedLogs AS (
                 SELECT
@@ -519,7 +530,9 @@ const getMultipleEmployeesAttendance = async (
                      ON al.EmployeeId = pd.EmployeeId
                  WHERE
                      al.status != 'Resigned'
-                    
+                     AND al.AttendanceDate >= CAST(:FromDate AS DATETIME)
+                     AND al.AttendanceDate < CAST(:ToDate AS DATETIME)
+                     ${filterCondition}
             ),
         DefaultLeaves AS (
             SELECT CAST(Date AS DATE) AS DefaultLeaveDate
@@ -541,6 +554,9 @@ const getMultipleEmployeesAttendance = async (
             WHERE
                 al.status != 'Resigned'
                 AND ISNULL(CAST(al.PunchRecords AS NVARCHAR(MAX)), '') <> ''
+                AND al.AttendanceDate >= CAST(:FromDate AS DATETIME)
+                AND al.AttendanceDate < CAST(:ToDate AS DATETIME)
+                ${punchFilterCondition}
             GROUP BY pd.EmployeeCode, CAST(al.AttendanceDate AS DATE)
         ),
         LeaveDays AS (

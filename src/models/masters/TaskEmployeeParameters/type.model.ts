@@ -31,10 +31,10 @@ export const TaskParametDTCreationSchema = z.object({
     Param_Id: z.number()
         .int('Param_Id must be an integer')
         .positive('Param_Id must be positive'),
-    Paramet_Data_Type: z.string()
+    Paramet_Data_Type: z.union([z.string(), z.number()])
         .nullable()
         .optional()
-        .transform(val => val === undefined ? null : val)
+        .transform(val => (val === undefined || val === null || val === '') ? null : String(val))
 });
 
 export const TaskParametDTUpdateSchema = z.object({
@@ -46,10 +46,10 @@ export const TaskParametDTUpdateSchema = z.object({
         .int('Param_Id must be an integer')
         .positive('Param_Id must be positive')
         .optional(),
-    Paramet_Data_Type: z.string()
+    Paramet_Data_Type: z.union([z.string(), z.number()])
         .nullable()
         .optional()
-        .transform(val => val === undefined ? null : val)
+        .transform(val => (val === undefined || val === null || val === '') ? null : String(val))
 });
 
 export const TaskParametDTQuerySchema = z.object({

@@ -474,8 +474,6 @@ const router = express.Router();
  *     description: Retrieve a paginated list of project schedules with optional search and filters
  *     tags: [Project Schedule]
  *     parameters:
- *       - $ref: '#/components/parameters/paginationPage'
- *       - $ref: '#/components/parameters/paginationLimit'
  *       - $ref: '#/components/parameters/searchQuery'
  *       - $ref: '#/components/parameters/statusFilter'
  *       - $ref: '#/components/parameters/planTypeFilter'

@@ -74,10 +74,14 @@ export const authenticate = async (
 
         if (session) {
             // Always fetch full user row so UserTypeId is never stale/missing
-            const user = await UserModel.unscoped().findOne({
-                attributes: ['Global_User_ID', 'Local_User_ID', 'UserName', 'UserTypeId', 'Name', 'Company_Id', 'UDel_Flag', 'Autheticate_Id'], // ADDED: Local_User_ID
-                where: { Global_User_ID: session.userId, UDel_Flag: 0 },
-            });
+            const defaultDb = getDefaultConnection();
+            const [users] = await defaultDb.query(
+                `SELECT Global_User_ID, Local_User_ID, UserName, UserTypeId, Name, Company_Id, UDel_Flag, Autheticate_Id 
+                 FROM tbl_Users WITH (NOLOCK) 
+                 WHERE Global_User_ID = :userId AND UDel_Flag = 0`,
+                { replacements: { userId: session.userId } }
+            ) as any[];
+            const user = users.length > 0 ? users[0] : null;
 
             if (!user) {
                 res.status(401).json({
@@ -111,10 +115,14 @@ export const authenticate = async (
         // ── Slow path: token not in cache — look up in DB ─────────────────────
         console.log('🔍 Token not in cache — checking database...');
 
-        const user = await UserModel.unscoped().findOne({
-            attributes: ['Global_User_ID', 'Local_User_ID', 'UserName', 'UserTypeId', 'Name', 'Company_Id', 'UDel_Flag', 'Autheticate_Id'], // ADDED: Local_User_ID
-            where: { Autheticate_Id: token, UDel_Flag: 0 },
-        });
+        const defaultDb = getDefaultConnection();
+        const [users] = await defaultDb.query(
+            `SELECT Global_User_ID, Local_User_ID, UserName, UserTypeId, Name, Company_Id, UDel_Flag, Autheticate_Id 
+             FROM tbl_Users WITH (NOLOCK) 
+             WHERE Autheticate_Id = :token AND UDel_Flag = 0`,
+            { replacements: { token } }
+        ) as any[];
+        const user = users.length > 0 ? users[0] : null;
 
         if (!user) {
             res.status(401).json({

@@ -194,8 +194,8 @@ export const getAttendanceHistory = async (req: Request, res: Response): Promise
 
         // Add date filters only if both From and To are provided
         if (From && To && isValidDate(From as string) && isValidDate(To as string)) {
-            query += ` AND CAST(a.Start_Date AS DATE) >= CAST(? AS DATE)
-                      AND CAST(a.Start_Date AS DATE) <= CAST(? AS DATE)`;
+            query += ` AND a.Start_Date >= CAST(? AS DATETIME)
+                      AND a.Start_Date < DATEADD(day, 1, CAST(? AS DATETIME))`;
             replacements.push(From, To);
         }
 
@@ -252,7 +252,8 @@ export const getTodayAttendance = async (req: Request, res: Response): Promise<R
                 u.BranchId AS Branch_Id
             FROM tbl_Attendance AS a
             LEFT JOIN tbl_Users AS u ON u.UserId = a.UserId
-            WHERE CAST(a.Start_Date AS DATE) = CAST(? AS DATE)
+            WHERE a.Start_Date >= CAST(? AS DATETIME)
+                AND a.Start_Date < DATEADD(day, 1, CAST(? AS DATETIME))
                 AND a.Active_Status = 1
             ORDER BY a.Start_Date DESC`,
             {
@@ -414,8 +415,8 @@ export const getEmployeeAttendanceSummary = async (req: Request, res: Response):
                 SUM(CASE WHEN Active_Status = 1 THEN 1 ELSE 0 END) AS openDays
             FROM tbl_Attendance
             WHERE UserId = ?
-                AND CAST(Start_Date AS DATE) >= CAST(? AS DATE)
-                AND CAST(Start_Date AS DATE) <= CAST(? AS DATE)`,
+                AND Start_Date >= CAST(? AS DATETIME)
+                AND Start_Date < DATEADD(day, 1, CAST(? AS DATETIME))`,
             {
                 replacements: [Number(UserId), fromDateStr, toDateStr],
                 type: QueryTypes.SELECT
@@ -463,8 +464,8 @@ export const getAttendanceStats = async (req: Request, res: Response): Promise<R
                 SUM(CASE WHEN Active_Status = 1 THEN 1 ELSE 0 END) AS totalOpen,
                 AVG(CASE WHEN Active_Status = 0 THEN 100 ELSE 0 END) AS completionRate
             FROM tbl_Attendance
-            WHERE CAST(Start_Date AS DATE) >= CAST(? AS DATE)
-                AND CAST(Start_Date AS DATE) <= CAST(? AS DATE)
+            WHERE Start_Date >= CAST(? AS DATETIME)
+                AND Start_Date < DATEADD(day, 1, CAST(? AS DATETIME))
         `;
 
         const replacements: any[] = [FromDate as string, ToDate as string];
@@ -589,7 +590,8 @@ export const employeewise = async (req: Request, res: Response): Promise<Respons
                     ON CAST(pd.EmployeeCode AS NVARCHAR(50)) = em.fingerPrintEmpId
                 LEFT JOIN etimetracklite1.dbo.AttendanceLogs al 
                     ON al.EmployeeId = pd.EmployeeId 
-                WHERE CAST(al.AttendanceDate AS DATE) BETWEEN ? AND ?
+                WHERE al.AttendanceDate >= CAST(? AS DATETIME) 
+                    AND al.AttendanceDate < DATEADD(day, 1, CAST(? AS DATETIME))
                     AND CAST(al.PunchRecords AS NVARCHAR(MAX)) IS NOT NULL  
                     AND LTRIM(RTRIM(CAST(al.PunchRecords AS NVARCHAR(MAX)))) <> ''
             ),

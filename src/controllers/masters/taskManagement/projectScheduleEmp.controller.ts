@@ -148,16 +148,25 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
             replacements.Invovled_Stat = Invovled_Stat;
         }
         if (from_Task_Assign_dt) {
+            const startDate = new Date(from_Task_Assign_dt);
+            startDate.setHours(0, 0, 0, 0);
             whereClause += ' AND td.Task_Assign_dt >= :from_Task_Assign_dt';
-            replacements.from_Task_Assign_dt = new Date(from_Task_Assign_dt);
+            replacements.from_Task_Assign_dt = startDate;
         }
         if (to_Task_Assign_dt) {
+            const endDate = new Date(to_Task_Assign_dt);
+            endDate.setHours(23, 59, 59, 999);
             whereClause += ' AND td.Task_Assign_dt <= :to_Task_Assign_dt';
-            replacements.to_Task_Assign_dt = new Date(to_Task_Assign_dt);
+            replacements.to_Task_Assign_dt = endDate;
         }
 
         const rows: any[] = await companyDB.query(
-            `SELECT 
+            `WITH LatestSchedules AS (
+                 SELECT Task_Id, MAX(Sch_Id) as Max_Sch_Id
+                 FROM tbl_Project_Schedule
+                 GROUP BY Task_Id
+             )
+             SELECT 
                 td.*,
                 ps.Task_Sch_Timer_Based as Schedule_Task_Sch_Timer_Based,
                 ps.Sch_No as Schedule_Sch_No,
@@ -172,7 +181,8 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
                 t.Task_Desc,
                 t.Task_Type_Id
              FROM tbl_Task_Details td
-             LEFT JOIN tbl_Project_Schedule ps ON td.Task_Id = ps.Task_Id
+             LEFT JOIN LatestSchedules ls ON ls.Task_Id = td.Task_Id
+             LEFT JOIN tbl_Project_Schedule ps ON ps.Sch_Id = ls.Max_Sch_Id
              LEFT JOIN tbl_Task t ON td.Task_Id = t.Task_Id
              WHERE ${whereClause}
              ORDER BY ${sortBy} ${sortOrder}`,
@@ -653,7 +663,8 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
                 `SELECT Id FROM tbl_Task_Details 
                  WHERE Sch_Id = :schId 
                    AND Emp_Id = :empId 
-                   AND CAST(Task_Assign_dt AS DATE) = CAST(:taskAssignDt AS DATE)
+                   AND Task_Assign_dt >= CAST(:taskAssignDt AS DATETIME)
+                   AND Task_Assign_dt < DATEADD(day, 1, CAST(:taskAssignDt AS DATETIME))
                    AND Id != :id`,
                 {
                     replacements: {
@@ -897,7 +908,8 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
                     `SELECT Id FROM tbl_Task_Details 
                      WHERE Sch_Id = :schId 
                        AND Emp_Id = :empId 
-                       AND CAST(Task_Assign_dt AS DATE) = CAST(:taskAssignDt AS DATE)`,
+                       AND Task_Assign_dt >= CAST(:taskAssignDt AS DATETIME)
+                   AND Task_Assign_dt < DATEADD(day, 1, CAST(:taskAssignDt AS DATETIME))`,
                     {
                         replacements: {
                             schId: Sch_Id,
@@ -1123,7 +1135,8 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
                     `SELECT Id FROM tbl_Task_Details 
                      WHERE Sch_Id = :schId 
                        AND Emp_Id = :empId 
-                       AND CAST(Task_Assign_dt AS DATE) = CAST(:taskAssignDt AS DATE)`,
+                       AND Task_Assign_dt >= CAST(:taskAssignDt AS DATETIME)
+                   AND Task_Assign_dt < DATEADD(day, 1, CAST(:taskAssignDt AS DATETIME))`,
                     {
                         replacements: {
                             schId,
