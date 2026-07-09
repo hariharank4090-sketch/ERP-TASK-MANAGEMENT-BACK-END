@@ -115,7 +115,7 @@ const createUserType = async (req, res) => {
             // Properly handle ZodError format
             const errorMessages = parsed.error.issues.map(e => ({
                 field: e.path.join('.'),
-                message: e.message,
+                message: 'Internal server error',
             }));
             return res.status(400).json({
                 status: 'error',
@@ -194,7 +194,7 @@ const updateUserType = async (req, res) => {
             // Properly handle ZodError format
             const errorMessages = parsed.error.issues.map(e => ({
                 field: e.path.join('.'),
-                message: e.message,
+                message: 'Internal server error',
             }));
             return res.status(400).json({
                 status: 'error',

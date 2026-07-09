@@ -381,11 +381,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching employees:', error);
-        return res.status(500).json({
-            success: false,
-            message: error.message || 'Internal server error',
-            error: error.toString(),
-        });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -434,7 +430,7 @@ export const getEmployeeById = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -475,7 +471,7 @@ export const getEmployeeByCode = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching employee by code:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -526,7 +522,7 @@ export const createEmployee = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error creating employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -591,7 +587,7 @@ export const updateEmployee = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error updating employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -623,7 +619,7 @@ export const deleteEmployee = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error deleting employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -663,7 +659,7 @@ export const getEmployeesByBranch = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching employees by branch:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -703,7 +699,7 @@ export const getEmployeesByDepartment = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching employees by department:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -737,7 +733,7 @@ export const getActiveEmployees = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching active employees:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -804,7 +800,7 @@ export const bulkCreateEmployees = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error in bulk employee creation:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -860,7 +856,7 @@ export const getEmployeeStatistics = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching employee statistics:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -917,7 +913,7 @@ export const partialUpdateEmployee = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error partially updating employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -971,7 +967,7 @@ export const searchEmployees = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error searching employees:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -1015,7 +1011,7 @@ export const getEmployeeCount = async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('Error fetching employee count:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -1073,7 +1069,7 @@ export const getEmployeesBySalaryRange = async (req: Request, res: Response) => 
 
     } catch (error: any) {
         console.error('Error fetching employees by salary range:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -1103,6 +1099,6 @@ export const getCurrentPermissions = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error('Error getting permissions:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };

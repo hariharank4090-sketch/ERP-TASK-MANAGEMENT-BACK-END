@@ -16,7 +16,7 @@ const validateWithZod = (schema, data) => {
                 success: false,
                 errors: err.issues.map(e => ({
                     field: e.path.join('.') || 'unknown',
-                    message: e.message
+                    message: 'Internal server error'
                 }))
             };
         }

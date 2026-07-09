@@ -204,7 +204,7 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
         console.error('Error fetching task details:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -274,7 +274,7 @@ export const getTaskDetailById = async (req: Request, res: Response) => {
         console.error('Error fetching task detail:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -332,7 +332,7 @@ export const getTaskDetailsByProject = async (req: Request, res: Response) => {
         console.error('Error fetching task details by project:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -390,7 +390,7 @@ export const getTaskDetailsBySchedule = async (req: Request, res: Response) => {
         console.error('Error fetching task details by schedule:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -448,7 +448,7 @@ export const getTaskDetailsByTask = async (req: Request, res: Response) => {
         console.error('Error fetching task details by task:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -506,7 +506,7 @@ export const getTaskDetailsByEmployee = async (req: Request, res: Response) => {
         console.error('Error fetching task details by employee:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -607,7 +607,7 @@ export const getTaskDetailsWithFilters = async (req: Request, res: Response) => 
         console.error('Error fetching task details with filters:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -731,7 +731,7 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
         console.error('Error updating task detail:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -776,7 +776,7 @@ export const deleteTaskDetail = async (req: Request, res: Response) => {
         console.error('Error deleting task detail:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -827,7 +827,7 @@ export const getTaskDetailsStatistics = async (req: Request, res: Response) => {
         console.error('Error fetching statistics:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };

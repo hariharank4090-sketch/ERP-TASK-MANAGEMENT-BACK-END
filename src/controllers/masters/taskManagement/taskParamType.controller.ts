@@ -176,7 +176,7 @@ export const getAllParametDataTypes = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };
@@ -233,7 +233,7 @@ export const getParametDataTypeById = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };
@@ -275,7 +275,7 @@ export const getAllActiveParametDataTypes = async (req: Request, res: Response) 
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };
@@ -348,7 +348,7 @@ export const createParametDataType = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };
@@ -451,7 +451,7 @@ export const updateParametDataType = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };
@@ -501,7 +501,7 @@ export const deleteParametDataType = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };
@@ -535,7 +535,7 @@ export const getParametDataTypeStatistics = async (req: Request, res: Response) 
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };
@@ -589,7 +589,7 @@ export const searchParametDataTypes = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            
         });
     }
 };

@@ -74,7 +74,7 @@ const validateWithZod = <T>(schema: any, data: any) => {
                 success: false,
                 errors: err.issues.map(e => ({
                     field: e.path.join('.') || 'unknown',
-                    message: e.message
+                    message: 'Internal server error'
                 }))
             };
         }
@@ -133,9 +133,9 @@ const WORK_DETAIL_SELECT_NO_PARAMS = `
 `;
 
 const formatWorkRow = (row: WorkWithDetails, index: number = 0): any => ({
-    SNo: row.SNo.toString(),
-    Work_Id: row.Work_Id.toString(),
-    Sch_Id: row.Sch_Id.toString(),
+    SNo: row.SNo ? row.SNo.toString() : null,
+    Work_Id: row.Work_Id ? row.Work_Id.toString() : null,
+    Sch_Id: row.Sch_Id ? row.Sch_Id.toString() : null,
     Sch_No: row.Sch_No || null,
     Sch_Date: row.Sch_Date || null,
     Sch_Start_Date: row.Sch_Start_Date || null,
@@ -147,7 +147,7 @@ const formatWorkRow = (row: WorkWithDetails, index: number = 0): any => ({
     Sch_Est_End_Time: row.Sch_Est_End_Time || null,
     Task_Sch_Duaration: row.Task_Sch_Duaration || null,
     Sch_Status: row.Sch_Status || null,
-    Task_Id: row.Task_Id.toString(),
+    Task_Id: row.Task_Id ? row.Task_Id.toString() : null,
     Task_Name: row.Task_Name || null,
     Project_Id: row.Project_Id ? row.Project_Id.toString() : null,
     Project_Name: row.Project_Name || null,
@@ -231,14 +231,15 @@ export const getAllWorks = async (req: Request, res: Response) => {
                 `, { replacements: { chunkIds }, type: QueryTypes.SELECT }) as any[];
 
                 params.forEach(p => {
-                    if (!paramsMap.has(p.Work_Id)) paramsMap.set(p.Work_Id, []);
-                    paramsMap.get(p.Work_Id).push(p);
+                    const key = String(p.Work_Id);
+                    if (!paramsMap.has(key)) paramsMap.set(key, []);
+                    paramsMap.get(key).push(p);
                 });
             }
 
             rows.forEach(r => {
-                const id = Number(r.Work_Id);
-                r.parameters = JSON.stringify(paramsMap.get(id) || []);
+                const key = String(r.Work_Id);
+                r.parameters = JSON.stringify(paramsMap.get(key) || []);
             });
         }
 
@@ -523,7 +524,7 @@ export const createWork = async (req: Request, res: Response) => {
     } catch (e: any) {
         await transaction.rollback().catch(() => {});
         console.error('Create/Update Error:', e);
-        return res.status(500).json({ success: false, message: e.message || 'Internal server error', error: e });
+        return res.status(500).json({ success: false, message: 'Internal server error', error: e });
     }
 };
 
@@ -643,7 +644,7 @@ export const updateWork = async (req: Request, res: Response) => {
     } catch (e: any) {
         await transaction.rollback().catch(() => {});
         console.error('Update Error:', e);
-        return res.status(500).json({ success: false, message: e.message || 'Internal server error', error: e });
+        return res.status(500).json({ success: false, message: 'Internal server error', error: e });
     }
 };
 
@@ -686,7 +687,7 @@ export const deleteWork = async (req: Request, res: Response) => {
     } catch (e: any) {
         await transaction.rollback().catch(() => {});
         console.error('Delete Error:', e);
-        return res.status(500).json({ success: false, message: e.message || 'Internal server error', error: e });
+        return res.status(500).json({ success: false, message: 'Internal server error', error: e });
     }
 };
 

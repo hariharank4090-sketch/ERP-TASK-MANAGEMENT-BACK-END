@@ -171,7 +171,7 @@ const getAllTasks = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching tasks:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getAllTasks = getAllTasks;
@@ -231,7 +231,7 @@ const getTaskById = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching task:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getTaskById = getTaskById;
@@ -284,7 +284,7 @@ const getTasksByProject = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching tasks by project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getTasksByProject = getTasksByProject;
@@ -342,7 +342,7 @@ const getTasksByCompany = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching tasks by company:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getTasksByCompany = getTasksByCompany;
@@ -395,7 +395,7 @@ const getTasksByTaskGroup = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching tasks by task group:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getTasksByTaskGroup = getTasksByTaskGroup;
@@ -441,7 +441,7 @@ const getTasksWithNoCompany = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching tasks with no company:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getTasksWithNoCompany = getTasksWithNoCompany;
@@ -487,7 +487,7 @@ const getTasksWithNoProject = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching tasks with no project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getTasksWithNoProject = getTasksWithNoProject;
@@ -535,7 +535,7 @@ const getTaskSchedules = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching task schedules:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getTaskSchedules = getTaskSchedules;
@@ -596,7 +596,7 @@ const createTask = async (req, res) => {
     }
     catch (error) {
         console.error('Error creating task:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.createTask = createTask;
@@ -689,7 +689,7 @@ const updateTask = async (req, res) => {
     }
     catch (error) {
         console.error('Error updating task:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.updateTask = updateTask;
@@ -741,7 +741,7 @@ const deleteTask = async (req, res) => {
     }
     catch (error) {
         console.error('Error deleting task:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.deleteTask = deleteTask;

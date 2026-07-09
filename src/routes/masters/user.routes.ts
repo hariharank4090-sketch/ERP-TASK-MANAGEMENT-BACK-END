@@ -9,12 +9,12 @@ import {
     getUsersByType,
     testConnection
 } from '../../controllers/masters/taskManagement/dbuser.controller';
-import { sequelizeFromTokenMiddleware } from '../../config/sequalizer';
+import { setCompanyDatabase } from '../../middleware/database.middleware';
 
 const router = express.Router();
 
 // Apply middleware to all routes in this router
-router.use(sequelizeFromTokenMiddleware);
+router.use(setCompanyDatabase);
 
 /**
  * @swagger

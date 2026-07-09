@@ -320,11 +320,7 @@ const getAllEmployees = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employees:', error);
-        return res.status(500).json({
-            success: false,
-            message: error.message || 'Internal server error',
-            error: error.toString(),
-        });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getAllEmployees = getAllEmployees;
@@ -367,7 +363,7 @@ const getEmployeeById = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getEmployeeById = getEmployeeById;
@@ -402,7 +398,7 @@ const getEmployeeByCode = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employee by code:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getEmployeeByCode = getEmployeeByCode;
@@ -444,7 +440,7 @@ const createEmployee = async (req, res) => {
     }
     catch (error) {
         console.error('Error creating employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.createEmployee = createEmployee;
@@ -498,7 +494,7 @@ const updateEmployee = async (req, res) => {
     }
     catch (error) {
         console.error('Error updating employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.updateEmployee = updateEmployee;
@@ -524,7 +520,7 @@ const deleteEmployee = async (req, res) => {
     }
     catch (error) {
         console.error('Error deleting employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.deleteEmployee = deleteEmployee;
@@ -557,7 +553,7 @@ const getEmployeesByBranch = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employees by branch:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getEmployeesByBranch = getEmployeesByBranch;
@@ -590,7 +586,7 @@ const getEmployeesByDepartment = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employees by department:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getEmployeesByDepartment = getEmployeesByDepartment;
@@ -619,7 +615,7 @@ const getActiveEmployees = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching active employees:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getActiveEmployees = getActiveEmployees;
@@ -677,7 +673,7 @@ const bulkCreateEmployees = async (req, res) => {
     }
     catch (error) {
         console.error('Error in bulk employee creation:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.bulkCreateEmployees = bulkCreateEmployees;
@@ -728,7 +724,7 @@ const getEmployeeStatistics = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employee statistics:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getEmployeeStatistics = getEmployeeStatistics;
@@ -776,7 +772,7 @@ const partialUpdateEmployee = async (req, res) => {
     }
     catch (error) {
         console.error('Error partially updating employee:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.partialUpdateEmployee = partialUpdateEmployee;
@@ -831,7 +827,7 @@ const searchEmployees = async (req, res) => {
     }
     catch (error) {
         console.error('Error searching employees:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.searchEmployees = searchEmployees;
@@ -872,7 +868,7 @@ const getEmployeeCount = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employee count:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getEmployeeCount = getEmployeeCount;
@@ -923,7 +919,7 @@ const getEmployeesBySalaryRange = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching employees by salary range:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getEmployeesBySalaryRange = getEmployeesBySalaryRange;
@@ -952,7 +948,7 @@ const getCurrentPermissions = async (req, res) => {
     }
     catch (error) {
         console.error('Error getting permissions:', error);
-        return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 exports.getCurrentPermissions = getCurrentPermissions;

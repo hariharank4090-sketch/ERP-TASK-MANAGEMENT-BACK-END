@@ -15,7 +15,7 @@ const validateWithZod = (schema, data) => {
                 success: false,
                 errors: err.issues.map(e => ({
                     field: e.path.join('.') || 'unknown',
-                    message: e.message
+                    message: 'Internal server error'
                 }))
             };
         }
@@ -115,7 +115,7 @@ const getAllUsers = async (req, res) => {
         console.error('Get All Users Error:', e);
         return res.status(500).json({
             success: false,
-            message: e.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? e.message : undefined
         });
     }
@@ -170,7 +170,7 @@ const getUserById = async (req, res) => {
         console.error('Get User By ID Error:', e);
         return res.status(500).json({
             success: false,
-            message: e.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? e.message : undefined
         });
     }
@@ -221,7 +221,7 @@ const getUserDropdown = async (req, res) => {
         console.error('User Dropdown Error:', e);
         return res.status(500).json({
             success: false,
-            message: e.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? e.message : undefined
         });
     }
@@ -281,7 +281,7 @@ const getDeletedUsers = async (req, res) => {
         console.error('Get Deleted Users Error:', e);
         return res.status(500).json({
             success: false,
-            message: e.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? e.message : undefined
         });
     }
@@ -330,7 +330,7 @@ const getUsersByCompany = async (req, res) => {
         console.error('Get Users By Company Error:', e);
         return res.status(500).json({
             success: false,
-            message: e.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? e.message : undefined
         });
     }
@@ -379,7 +379,7 @@ const getUsersByBranch = async (req, res) => {
         console.error('Get Users By Branch Error:', e);
         return res.status(500).json({
             success: false,
-            message: e.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? e.message : undefined
         });
     }
@@ -428,7 +428,7 @@ const getUsersByType = async (req, res) => {
         console.error('Get Users By Type Error:', e);
         return res.status(500).json({
             success: false,
-            message: e.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? e.message : undefined
         });
     }

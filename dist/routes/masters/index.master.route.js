@@ -21,6 +21,7 @@ const workParameter_routes_1 = __importDefault(require("./workParameter.routes")
 const workMaster_routes_1 = __importDefault(require("./workMaster.routes"));
 const TaskEmployeeParameters_router_1 = __importDefault(require("./TaskEmployeeParameters.router"));
 const leave_routes_1 = __importDefault(require("./leave.routes"));
+const branchMaster_route_1 = __importDefault(require("./branchMaster.route"));
 const router = express_1.default.Router();
 router.use('/taskType', taskType_routes_1.default);
 router.use('/project', project_routes_1.default);
@@ -40,4 +41,5 @@ router.use('/workParameter', workParameter_routes_1.default);
 router.use('/taskParameterDetails', TaskEmployeeParameters_router_1.default);
 router.use('/workMaster', workMaster_routes_1.default);
 router.use('/leave', leave_routes_1.default);
+router.use('/branch', branchMaster_route_1.default);
 exports.default = router;

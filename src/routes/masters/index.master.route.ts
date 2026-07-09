@@ -18,6 +18,7 @@ import WorkParameter from './workParameter.routes';
 import  WorkMaster  from './workMaster.routes';
 import  TaskEmployeeParameters from './TaskEmployeeParameters.router';
 import leavemaster from './leave.routes';
+import branchMasterRoutes from './branchMaster.route';
 const router = express.Router();
 
 
@@ -41,6 +42,7 @@ router.use('/workParameter',WorkParameter)
 router.use('/taskParameterDetails',TaskEmployeeParameters)
 router.use('/workMaster',WorkMaster)
 router.use('/leave',leavemaster)
+router.use('/branch', branchMasterRoutes)
 
 
 export default router;

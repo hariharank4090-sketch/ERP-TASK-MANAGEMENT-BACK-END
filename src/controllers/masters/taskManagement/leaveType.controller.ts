@@ -85,7 +85,7 @@ const validateWithZod = <T>(schema: any, data: any) => {
                 success: false,
                 errors: err.issues.map(e => ({
                     field: e.path.join('.') || 'unknown',
-                    message: e.message
+                    message: 'Internal server error'
                 }))
             };
         }
@@ -277,7 +277,7 @@ export const createLeaveType = async (req: Request, res: Response) => {
     } catch (e: any) {
         console.error('Create Error Details:', {
             name: e.name,
-            message: e.message,
+            message: 'Internal server error',
             parent: e.parent?.message,
             sql: e.sql
         });

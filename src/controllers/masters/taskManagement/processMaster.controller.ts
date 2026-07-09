@@ -173,7 +173,7 @@ export const getAllProcessMaster = async (req: Request, res: Response) => {
         console.error('Error fetching processes:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -226,7 +226,7 @@ export const getProcessMasterById = async (req: Request, res: Response) => {
         console.error('Error fetching process:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -291,7 +291,7 @@ export const createProcessMaster = async (req: Request, res: Response) => {
         console.error('Error creating process:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -390,7 +390,7 @@ export const updateProcessMaster = async (req: Request, res: Response) => {
         console.error('Error updating process:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -443,7 +443,7 @@ export const deleteProcessMaster = async (req: Request, res: Response) => {
         console.error('Error deleting process:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error',
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -478,7 +478,7 @@ export const getAllProcessesSimple = async (req: Request, res: Response) => {
         console.error('Error fetching processes:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };
@@ -510,7 +510,7 @@ export const getProcessStatistics = async (req: Request, res: Response) => {
         console.error('Error fetching process statistics:', error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Internal server error'
+            message: 'Internal server error'
         });
     }
 };

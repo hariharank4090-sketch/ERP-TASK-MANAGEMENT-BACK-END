@@ -118,7 +118,7 @@ const getAllProjects = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching projects:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getAllProjects = getAllProjects;
@@ -162,7 +162,7 @@ const getProjectById = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectById = getProjectById;
@@ -206,7 +206,7 @@ const getProjectsByCompany = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching projects by company:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectsByCompany = getProjectsByCompany;
@@ -245,7 +245,7 @@ const getProjectsByProjectHead = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching projects by project head:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectsByProjectHead = getProjectsByProjectHead;
@@ -291,7 +291,7 @@ const getProjectsByStatus = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching projects by status:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectsByStatus = getProjectsByStatus;
@@ -322,7 +322,7 @@ const getActiveProjects = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching active projects:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getActiveProjects = getActiveProjects;
@@ -384,7 +384,7 @@ const createProject = async (req, res) => {
     }
     catch (error) {
         console.error('Error creating project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.createProject = createProject;
@@ -479,7 +479,7 @@ const updateProject = async (req, res) => {
     }
     catch (error) {
         console.error('Error updating project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.updateProject = updateProject;
@@ -526,7 +526,7 @@ const deleteProject = async (req, res) => {
     }
     catch (error) {
         console.error('Error deleting project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.deleteProject = deleteProject;
@@ -557,7 +557,7 @@ const getProjectsWithNoCompany = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching projects with no company:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectsWithNoCompany = getProjectsWithNoCompany;
@@ -588,7 +588,7 @@ const getProjectsWithNoProjectHead = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching projects with no project head:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectsWithNoProjectHead = getProjectsWithNoProjectHead;
@@ -642,7 +642,7 @@ const toggleProjectStatus = async (req, res) => {
     }
     catch (error) {
         console.error('Error toggling project status:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.toggleProjectStatus = toggleProjectStatus;
@@ -704,7 +704,7 @@ const getProjectStatistics = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching project statistics:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectStatistics = getProjectStatistics;
@@ -740,7 +740,7 @@ const getStatusOptions = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching status options:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getStatusOptions = getStatusOptions;
@@ -777,7 +777,7 @@ const hardDeleteProject = async (req, res) => {
     }
     catch (error) {
         console.error('Error hard deleting project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.hardDeleteProject = hardDeleteProject;
@@ -831,7 +831,7 @@ const reactivateProject = async (req, res) => {
     }
     catch (error) {
         console.error('Error reactivating project:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.reactivateProject = reactivateProject;
@@ -889,7 +889,7 @@ const getProjectsForDropdown = async (req, res) => {
     }
     catch (error) {
         console.error('Error fetching projects for dropdown:', error);
-        return (0, responseObject_1.servError)(res, error.message || 'Internal server error');
+        return (0, responseObject_1.servError)(error, res, 'Internal server error');
     }
 };
 exports.getProjectsForDropdown = getProjectsForDropdown;

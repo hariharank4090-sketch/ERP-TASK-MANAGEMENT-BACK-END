@@ -134,7 +134,6 @@ const getAllParametDataTypes = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
@@ -183,7 +182,6 @@ const getParametDataTypeById = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
@@ -221,7 +219,6 @@ const getAllActiveParametDataTypes = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
@@ -284,7 +281,6 @@ const createParametDataType = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
@@ -372,7 +368,6 @@ const updateParametDataType = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
@@ -414,7 +409,6 @@ const deleteParametDataType = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
@@ -445,7 +439,6 @@ const getParametDataTypeStatistics = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
@@ -492,7 +485,6 @@ const searchParametDataTypes = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
         });
     }
 };
