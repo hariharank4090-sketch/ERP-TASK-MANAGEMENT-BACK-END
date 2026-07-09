@@ -1,42 +1,88 @@
+// controllers/masters/taskManagement/branchMaster.controller.ts
 import { Request, Response } from 'express';
-import { Sequelize, QueryTypes } from 'sequelize';
+import { Op } from 'sequelize';
 import { ZodError } from 'zod';
+import {
+    created,
+    updated,
+    deleted,
+    servError,
+    notFound,
+    sentData
+} from '../../../responseObject';
+import { initBranchModel } from '../../../models/masters/branchMaster/type.model';
 import {
     branchCreateSchema,
     branchUpdateSchema,
     branchIdSchema,
-    branchQuerySchema,
     BranchCreateInput,
     BranchUpdateInput,
+    branchQuerySchema,
     BranchQueryParams
 } from '../../../models/masters/branchMaster/type.model';
 
-const validateWithZod = <T>(schema: any, data: any) => {
+const validateWithZod = <T>(schema: any, data: any): {
+    success: boolean;
+    data?: T;
+    errors?: Array<{ field: string; message: string }>
+} => {
     try {
-        return { success: true, data: schema.parse(data) as T };
-    } catch (err) {
-        if (err instanceof ZodError) {
+        const validatedData = schema.parse(data);
+        return { success: true, data: validatedData };
+    } catch (error: any) {
+        if (error instanceof ZodError) {
+            const zodIssues = error.issues || (error as any).errors || [];
             return {
                 success: false,
-                errors: err.issues.map(e => ({
-                    field: e.path.join('.') || 'unknown',
-                    message: 'Validation error: ' + e.message
+                errors: zodIssues.map((err: any) => ({
+                    field: Array.isArray(err.path) ? err.path.join('.') : String(err.path || 'unknown'),
+                    message: err.message || 'Validation error'
                 }))
             };
         }
-        return { success: false, errors: [{ field: 'unknown', message: 'Validation failed' }] };
+        return {
+            success: false,
+            errors: [{ field: 'unknown', message: 'Validation failed' }]
+        };
     }
 };
 
-const getSequelizeFromRequest = (req: Request): Sequelize => {
-    if ((req as any).companyDB) return (req as any).companyDB;
-    const { getDefaultConnection } = require('../../../config/sequalizer');
-    return getDefaultConnection();
+const getBranchModel = (req: Request) => {
+    const sequelize = (req as any).companyDB;
+    if (!sequelize) {
+        throw new Error('Database connection not available');
+    }
+    return initBranchModel(sequelize);
+};
+
+const handleForbiddenError = (res: Response, customMessage?: string) => {
+    return res.status(403).json({
+        success: false,
+        message: customMessage || 'Access denied. You do not have permission to perform this action.',
+        error: 'FORBIDDEN'
+    });
+};
+
+const checkUserPermission = (req: Request, requiredPermission?: string): boolean => {
+    const user = (req as any).user;
+    if (!user) return false;
+    if (user.UserTypeId === 0) return true;
+    
+    if (requiredPermission === 'create' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) return false;
+    if (requiredPermission === 'update' && ![1, 2].includes(user.UserTypeId)) return false;
+    if (requiredPermission === 'delete' && user.UserTypeId !== 1) return false;
+    if (requiredPermission === 'view' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) return false;
+    
+    return true;
 };
 
 export const getAllBranches = async (req: Request, res: Response) => {
     try {
-        const sequelize = getSequelizeFromRequest(req);
+        if (!checkUserPermission(req, 'view')) {
+            return handleForbiddenError(res, 'You do not have permission to view branches');
+        }
+
+        const sequelize = (req as any).companyDB;
         const validation = validateWithZod<BranchQueryParams>(branchQuerySchema, req.query);
 
         if (!validation.success) {
@@ -44,33 +90,42 @@ export const getAllBranches = async (req: Request, res: Response) => {
         }
 
         const { search, sortBy = 'BranchId', sortOrder = 'DESC', page = 1, limit = 20 } = validation.data!;
-
-        const whereConditions: string[] = ['Del_Flag = 0'];
+        
+        let whereStr = 'Del_Flag = 0';
         const replacements: any = {};
+        
+        const user = (req as any).user;
+        if (user && user.currentCompanyId) {
+            whereStr += ' AND Company_Id = :companyId';
+            replacements.companyId = user.currentCompanyId;
+        }
 
         if (search) {
-            whereConditions.push(`(BranchCode LIKE :search OR BranchName LIKE :search)`);
+            whereStr += ' AND (BranchCode LIKE :search OR BranchName LIKE :search)';
             replacements.search = `%${search}%`;
         }
 
-        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         const offset = (page - 1) * limit;
 
-        const countQuery = `SELECT COUNT(*) as total FROM tbl_Branch_Master ${whereClause}`;
-        const countResult = await sequelize.query(countQuery, { replacements, type: QueryTypes.SELECT }) as any[];
+        const countQuery = `SELECT COUNT(*) as total FROM tbl_Branch_Master WITH (NOLOCK) WHERE ${whereStr}`;
+        const countResult = await sequelize.query(countQuery, { replacements, type: sequelize.QueryTypes?.SELECT || 'SELECT' }) as any[];
         const totalRecords = countResult[0]?.total || 0;
 
-        const dataQuery = `
-            SELECT * FROM tbl_Branch_Master
-            ${whereClause}
+        const rawQuery = `
+            SELECT * FROM tbl_Branch_Master WITH (NOLOCK)
+            WHERE ${whereStr}
             ORDER BY ${sortBy} ${sortOrder}
             OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
         `;
         replacements.offset = offset;
         replacements.limit = limit;
 
-        const rows = await sequelize.query(dataQuery, { replacements, type: QueryTypes.SELECT });
+        const rows = await sequelize.query(rawQuery, {
+            replacements,
+            type: sequelize.QueryTypes?.SELECT || 'SELECT'
+        });
 
+        // Add custom pagination structure manually or rely on sentData
         return res.status(200).json({ 
             success: true, 
             message: 'Branches retrieved successfully', 
@@ -83,182 +138,178 @@ export const getAllBranches = async (req: Request, res: Response) => {
             }
         });
 
-    } catch (e: any) {
-        console.error('Get All Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error' });
+    } catch (error: any) {
+        console.error('Error fetching branches:', error);
+        return servError(error, res, 'Internal server error');
     }
 };
 
 export const getBranchById = async (req: Request, res: Response) => {
     try {
-        const sequelize = getSequelizeFromRequest(req);
-        const validation = validateWithZod<{ id: number }>(branchIdSchema, req.params);
-        if (!validation.success) return res.status(400).json({ success: false, message: 'Invalid ID parameter' });
+        if (!checkUserPermission(req, 'view')) {
+            return handleForbiddenError(res, 'You do not have permission to view branches');
+        }
+
+        const Branch = getBranchModel(req);
+        const validation = validateWithZod<{ id: number }>(branchIdSchema, { id: parseInt(req.params.id) });
+        
+        if (!validation.success) {
+            return res.status(400).json({ success: false, message: 'Validation failed', errors: validation.errors });
+        }
 
         const { id } = validation.data!;
-        const result = await sequelize.query(
-            `SELECT * FROM tbl_Branch_Master WHERE BranchId = :id AND Del_Flag = 0`,
-            { replacements: { id }, type: QueryTypes.SELECT }
-        );
+        const branch = await Branch.findByPk(id);
+        
+        if (!branch || branch.Del_Flag === 1) {
+            return notFound(res, 'Branch not found');
+        }
 
-        if (!result.length) return res.status(404).json({ success: false, message: 'Branch not found' });
-        return res.status(200).json({ success: true, message: 'Branch retrieved successfully', data: result[0] });
+        const user = (req as any).user;
+        if (user && user.currentCompanyId && branch.Company_id !== user.currentCompanyId) {
+            return handleForbiddenError(res, 'You do not have permission to access this branch');
+        }
 
-    } catch (e: any) {
-        console.error('Get By ID Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error' });
+        return res.status(200).json({
+            success: true,
+            message: 'Branch retrieved successfully',
+            data: branch
+        });
+
+    } catch (error: any) {
+        console.error('Error fetching branch:', error);
+        return servError(error, res, 'Internal server error');
     }
 };
 
 export const createBranch = async (req: Request, res: Response) => {
-    const sequelize = getSequelizeFromRequest(req);
-    const transaction = await (sequelize as any).transaction();
+    const sequelize = (req as any).companyDB;
+    const transaction = await sequelize.transaction();
 
     try {
+        if (!checkUserPermission(req, 'create')) {
+            await transaction.rollback();
+            return handleForbiddenError(res, 'You do not have permission to create branches');
+        }
+
         const validation = validateWithZod<BranchCreateInput>(branchCreateSchema, req.body);
         if (!validation.success) {
-            await transaction.rollback().catch(() => {});
+            await transaction.rollback();
             return res.status(400).json({ success: false, message: 'Validation failed', errors: validation.errors });
         }
 
         const data = validation.data!;
-        const nextIdResult = await sequelize.query(
-            `SELECT ISNULL(MAX(BranchId), 0) + 1 as nextId FROM tbl_Branch_Master`,
-            { type: QueryTypes.SELECT, transaction }
-        ) as any[];
-        const branchId = nextIdResult[0].nextId;
-
-        const fields = ['BranchId'];
-        const values = [':BranchId'];
-        const replacements: any = { BranchId: branchId };
-
-        for (const [key, value] of Object.entries(data)) {
-            if (value !== undefined) {
-                fields.push(key);
-                values.push(`:${key}`);
-                replacements[key] = value;
-            }
+        const user = (req as any).user;
+        
+        if (user && user.currentCompanyId && !data.Company_id) {
+            data.Company_id = user.currentCompanyId;
         }
 
-        fields.push('Entry_Date');
-        values.push('GETDATE()');
-
-        const insertQuery = `INSERT INTO tbl_Branch_Master (${fields.join(', ')}) VALUES (${values.join(', ')})`;
+        const Branch = getBranchModel(req);
         
-        await sequelize.query(insertQuery, { replacements, transaction });
+        const newBranch = await Branch.create({
+            ...data,
+            Entry_Date: new Date(),
+            Entry_By: user ? user.Global_User_ID : null
+        }, { transaction });
+
         await transaction.commit();
+        return created(res, newBranch, 'Branch created successfully');
 
-        const result = await sequelize.query(
-            `SELECT * FROM tbl_Branch_Master WHERE BranchId = :BranchId`,
-            { replacements, type: QueryTypes.SELECT }
-        );
-
-        return res.status(201).json({ success: true, message: 'Branch created successfully', data: result[0] });
-
-    } catch (e: any) {
+    } catch (error: any) {
         await transaction.rollback().catch(() => {});
-        console.error('Create Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error', error: e });
+        console.error('Create Error:', error);
+        return servError(error, res, 'Internal server error');
     }
 };
 
 export const updateBranch = async (req: Request, res: Response) => {
-    const sequelize = getSequelizeFromRequest(req);
-    const transaction = await (sequelize as any).transaction();
+    const sequelize = (req as any).companyDB;
+    const transaction = await sequelize.transaction();
 
     try {
-        const idValidation = validateWithZod<{ id: number }>(branchIdSchema, req.params);
+        if (!checkUserPermission(req, 'update')) {
+            await transaction.rollback();
+            return handleForbiddenError(res, 'You do not have permission to update branches');
+        }
+
+        const idValidation = validateWithZod<{ id: number }>(branchIdSchema, { id: parseInt(req.params.id) });
         if (!idValidation.success) {
-            await transaction.rollback().catch(() => {});
+            await transaction.rollback();
             return res.status(400).json({ success: false, message: 'Invalid ID parameter' });
         }
 
         const { id } = idValidation.data!;
+        const Branch = getBranchModel(req);
         
-        const existing = await sequelize.query(
-            `SELECT BranchId FROM tbl_Branch_Master WHERE BranchId = :id AND Del_Flag = 0`,
-            { replacements: { id }, type: QueryTypes.SELECT, transaction }
-        ) as any[];
-
-        if (!existing.length) {
-            await transaction.rollback().catch(() => {});
-            return res.status(404).json({ success: false, message: 'Branch not found' });
+        const existing = await Branch.findByPk(id, { transaction });
+        if (!existing || existing.Del_Flag === 1) {
+            await transaction.rollback();
+            return notFound(res, 'Branch not found');
         }
 
         const bodyValidation = validateWithZod<BranchUpdateInput>(branchUpdateSchema, req.body);
         if (!bodyValidation.success) {
-            await transaction.rollback().catch(() => {});
+            await transaction.rollback();
             return res.status(400).json({ success: false, message: 'Validation failed', errors: bodyValidation.errors });
         }
 
         const data = bodyValidation.data!;
-        const setClauses: string[] = [];
-        const replacements: any = { id };
+        const user = (req as any).user;
 
-        for (const [key, value] of Object.entries(data)) {
-            if (value !== undefined) {
-                setClauses.push(`${key} = :${key}`);
-                replacements[key] = value;
-            }
-        }
-
-        if (setClauses.length > 0) {
-            setClauses.push('Modified_Date = GETDATE()');
-            
-            const updateQuery = `UPDATE tbl_Branch_Master SET ${setClauses.join(', ')} WHERE BranchId = :id`;
-            await sequelize.query(updateQuery, { replacements, transaction });
-        }
+        await existing.update({
+            ...data,
+            Modified_Date: new Date(),
+            Modified_By: user ? user.Global_User_ID : null
+        }, { transaction });
 
         await transaction.commit();
+        return updated(res, existing, 'Branch updated successfully');
 
-        const result = await sequelize.query(
-            `SELECT * FROM tbl_Branch_Master WHERE BranchId = :id`,
-            { replacements: { id }, type: QueryTypes.SELECT }
-        );
-
-        return res.status(200).json({ success: true, message: 'Branch updated successfully', data: result[0] });
-
-    } catch (e: any) {
+    } catch (error: any) {
         await transaction.rollback().catch(() => {});
-        console.error('Update Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error', error: e });
+        console.error('Update Error:', error);
+        return servError(error, res, 'Internal server error');
     }
 };
 
 export const deleteBranch = async (req: Request, res: Response) => {
-    const sequelize = getSequelizeFromRequest(req);
-    const transaction = await (sequelize as any).transaction();
+    const sequelize = (req as any).companyDB;
+    const transaction = await sequelize.transaction();
 
     try {
-        const idValidation = validateWithZod<{ id: number }>(branchIdSchema, req.params);
+        if (!checkUserPermission(req, 'delete')) {
+            await transaction.rollback();
+            return handleForbiddenError(res, 'You do not have permission to delete branches');
+        }
+
+        const idValidation = validateWithZod<{ id: number }>(branchIdSchema, { id: parseInt(req.params.id) });
         if (!idValidation.success) {
-            await transaction.rollback().catch(() => {});
+            await transaction.rollback();
             return res.status(400).json({ success: false, message: 'Invalid ID parameter' });
         }
 
         const { id } = idValidation.data!;
+        const Branch = getBranchModel(req);
         
-        const existing = await sequelize.query(
-            `SELECT BranchId FROM tbl_Branch_Master WHERE BranchId = :id AND Del_Flag = 0`,
-            { replacements: { id }, type: QueryTypes.SELECT, transaction }
-        ) as any[];
-
-        if (!existing.length) {
-            await transaction.rollback().catch(() => {});
-            return res.status(404).json({ success: false, message: 'Branch not found' });
+        const existing = await Branch.findByPk(id, { transaction });
+        if (!existing || existing.Del_Flag === 1) {
+            await transaction.rollback();
+            return notFound(res, 'Branch not found');
         }
 
-        await sequelize.query(
-            `UPDATE tbl_Branch_Master SET Del_Flag = 1, Deleted_Date = GETDATE() WHERE BranchId = :id`,
-            { replacements: { id }, transaction }
-        );
+        const user = (req as any).user;
+        await existing.update({
+            Del_Flag: 1,
+            Deleted_Date: new Date(),
+            Deleted_By: user ? user.Global_User_ID : null
+        }, { transaction });
 
         await transaction.commit();
-        return res.status(200).json({ success: true, message: 'Branch deleted successfully' });
+        return deleted(res, 'Branch deleted successfully');
 
-    } catch (e: any) {
+    } catch (error: any) {
         await transaction.rollback().catch(() => {});
-        console.error('Delete Error:', e);
-        return res.status(500).json({ success: false, message: 'Internal server error', error: e });
+        console.error('Delete Error:', error);
+        return servError(error, res, 'Internal server error');
     }
 };

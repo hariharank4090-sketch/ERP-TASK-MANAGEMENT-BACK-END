@@ -2,9 +2,17 @@ import { Request, Response, NextFunction } from "express";
 import { UserMaster } from "../../../models/masters/users/users.model";
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
-    const auth = req.header("Authorization");
-    if (!auth?.startsWith("Bearer ")) return res.status(401).json({ message: "Missing token" });
-    const authenticateId = auth.substring("Bearer ".length);
+    const authHeader = req.header("Authorization");
+    let authenticateId = "";
+
+    if (authHeader?.startsWith("Bearer ")) {
+        authenticateId = authHeader.substring("Bearer ".length);
+    } else if (req.query.token && typeof req.query.token === "string") {
+        // Fallback for easy browser testing (e.g. ?token=...)
+        authenticateId = req.query.token;
+    } else {
+        return res.status(401).json({ message: "Missing token" });
+    }
     
     try {
         const user = await UserMaster.findOne({

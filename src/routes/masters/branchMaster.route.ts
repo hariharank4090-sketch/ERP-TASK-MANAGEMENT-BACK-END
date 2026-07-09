@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express from 'express';
 import {
     getAllBranches,
     getBranchById,
@@ -6,8 +6,9 @@ import {
     updateBranch,
     deleteBranch
 } from '../../controllers/masters/taskManagement/branchMaster.controller';
+import { authenticate, authorize } from '../../middleware/auth';
 
-const router = Router();
+const router = express.Router();
 
 /**
  * @swagger
@@ -22,6 +23,8 @@ const router = Router();
  *   get:
  *     summary: Get all branches with pagination and filtering
  *     tags: [Branch Master]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - name: search
  *         in: query
@@ -46,7 +49,7 @@ const router = Router();
  *       500:
  *         description: Internal server error
  */
-router.get('/', getAllBranches);
+router.get('/', authenticate, authorize([]), getAllBranches);
 
 /**
  * @swagger
@@ -54,6 +57,8 @@ router.get('/', getAllBranches);
  *   get:
  *     summary: Get a branch by ID
  *     tags: [Branch Master]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - name: id
  *         in: path
@@ -68,7 +73,7 @@ router.get('/', getAllBranches);
  *       500:
  *         description: Internal server error
  */
-router.get('/:id', getBranchById);
+router.get('/:id', authenticate, authorize([]), getBranchById);
 
 /**
  * @swagger
@@ -76,6 +81,8 @@ router.get('/:id', getBranchById);
  *   post:
  *     summary: Create a new branch
  *     tags: [Branch Master]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -99,7 +106,7 @@ router.get('/:id', getBranchById);
  *       500:
  *         description: Internal server error
  */
-router.post('/', createBranch);
+router.post('/', authenticate, authorize([]), createBranch);
 
 /**
  * @swagger
@@ -107,6 +114,8 @@ router.post('/', createBranch);
  *   put:
  *     summary: Update an existing branch
  *     tags: [Branch Master]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - name: id
  *         in: path
@@ -134,7 +143,7 @@ router.post('/', createBranch);
  *       500:
  *         description: Internal server error
  */
-router.put('/:id', updateBranch);
+router.put('/:id', authenticate, authorize([]), updateBranch);
 
 /**
  * @swagger
@@ -142,6 +151,8 @@ router.put('/:id', updateBranch);
  *   delete:
  *     summary: Delete a branch by ID
  *     tags: [Branch Master]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - name: id
  *         in: path
@@ -156,6 +167,6 @@ router.put('/:id', updateBranch);
  *       500:
  *         description: Internal server error
  */
-router.delete('/:id', deleteBranch);
+router.delete('/:id', authenticate, authorize([]), deleteBranch);
 
 export default router;
