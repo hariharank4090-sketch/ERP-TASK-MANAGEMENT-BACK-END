@@ -15,7 +15,7 @@
         "typescript",
         "backend"
     ],
-    "author": "gokulsabari",
+    "author": "k.HariHaran",
     "license": "ISC",
     "dependencies": {
         "bcrypt": "^6.0.0",
