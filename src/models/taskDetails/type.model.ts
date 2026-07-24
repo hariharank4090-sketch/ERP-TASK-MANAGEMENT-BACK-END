@@ -141,7 +141,9 @@ export const taskDetailCreateSchema = z.object({
   Emp_Ids: z.array(z.union([z.number(), z.string()])).min(1).max(100).transform(arr => arr.map(val => Number(val))),
   Sch_Period: z.string().max(50).optional().nullable(),
   Ord_By: z.union([z.number(), z.string(), z.null(), z.undefined()]).optional().transform(val => val ? Number(val) : null),
-  Invovled_Stat: z.union([z.number(), z.string(), z.null(), z.undefined()]).optional().transform(val => val ? Number(val) : null)
+  Invovled_Stat: z.union([z.number(), z.string(), z.null(), z.undefined()]).optional().transform(val => val ? Number(val) : null),
+  taskDates: z.array(z.string()).optional(),
+  employeeDates: z.record(z.string(), z.array(z.string())).optional()
 }).strict();
 
 export type TaskDetailCreateInput = z.infer<typeof taskDetailCreateSchema>;
@@ -164,7 +166,8 @@ export const taskDetailUpdateSchema = z.object({
   Sch_Time: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
   EN_Time: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
   Ord_By: z.union([z.number(), z.string(), z.null()]).optional().transform(val => val ? Number(val) : null),
-  Invovled_Stat: z.union([z.number(), z.string(), z.null()]).optional().transform(val => val ? Number(val) : null)
+  Invovled_Stat: z.union([z.number(), z.string(), z.null()]).optional().transform(val => val ? Number(val) : null),
+  taskDates: z.array(z.string()).optional()
 }).strict().partial();
 
 export type TaskDetailUpdateInput = z.infer<typeof taskDetailUpdateSchema>;

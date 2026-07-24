@@ -16,6 +16,8 @@ export const ScheduleCreateSchema = z.object({
     Sch_Type: z.number().int().min(1).max(4).optional().default(1),
     Sch_Start_Date: z.union([z.string(), z.date(), z.null()]).transform(val => val ? new Date(val) : null),
     Sch_End_Date: z.union([z.string(), z.date(), z.null()]).transform(val => val ? new Date(val) : null),
+    Sch_First_Start_Date: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
+    Sch_First_End_Date: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
     Task_Sch_Timer_Based: z.boolean().default(false),
     Sch_Est_Start_Time: z.string().nullable(),
     Sch_Est_End_Time: z.string().nullable(),
@@ -116,6 +118,8 @@ export const ScheduleUpdateSchema = z.object({
     Sch_Type: z.number().int().min(1).max(4).optional(),
     Sch_Start_Date: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
     Sch_End_Date: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
+    Sch_First_Start_Date: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
+    Sch_First_End_Date: z.union([z.string(), z.date(), z.null()]).optional().transform(val => val ? new Date(val) : null),
     Task_Sch_Timer_Based: z.boolean().optional(),
     Sch_Est_Start_Time: z.string().nullable().optional(),
     Sch_Est_End_Time: z.string().nullable().optional(),
@@ -127,7 +131,8 @@ export const ScheduleUpdateSchema = z.object({
         Plan_Day: z.union([z.number().int().min(0).max(31), z.null()]).optional()
     }).optional(),
     selectedDays: z.array(z.number().int()).optional(),
-    specificDates: z.array(z.string()).optional()
+    specificDates: z.array(z.string()).optional(),
+    isExtension: z.boolean().optional()
 }).superRefine((data, ctx) => {
     // Basic date range validation: end must not be before start
     if (data.Sch_Start_Date && data.Sch_End_Date) {

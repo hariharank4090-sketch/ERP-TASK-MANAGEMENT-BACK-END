@@ -12,7 +12,8 @@ import {
     getTasksDropdown, 
     getScheduleTypesDropdown,
     getScheduleDetails,
-    updateScheduleStatus
+    updateScheduleStatus,
+    getExtensionsByScheduleId
 } from '../../controllers/masters/taskManagement/projectScedule.controller';
 
 const router = express.Router();
@@ -68,6 +69,16 @@ const router = express.Router();
  *           format: date
  *           nullable: true
  *           example: "2024-01-25"
+ *         Sch_First_Start_Date:
+ *           type: string
+ *           format: date
+ *           nullable: true
+ *           example: "2024-01-18"
+ *         Sch_First_End_Date:
+ *           type: string
+ *           format: date
+ *           nullable: true
+ *           example: "2024-01-23"
  *         Task_Sch_Timer_Based:
  *           type: boolean
  *           example: false
@@ -106,6 +117,13 @@ const router = express.Router();
  *         Sch_Del_Flag:
  *           type: boolean
  *           example: false
+ *         Sch_Type:
+ *           type: integer
+ *           example: 1
+ *         Sch_Comp_Date:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
  *
  *     ScheduleDetail:
  *       type: object
@@ -985,8 +1003,18 @@ router.patch('/:id/status',
  */
 router.delete('/:id',
     authenticate,
-    authorize([]), 
+    authorize([]),
     deleteSchedule
+);
+
+router.get('/:id/extensions',
+    authenticate,
+    authorize([]),
+    getExtensionsByScheduleId
+);
+
+router.get('/test-extensions/:id',
+    getExtensionsByScheduleId
 );
 
 export default router;

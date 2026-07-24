@@ -60,7 +60,20 @@ const validateWithZod = <T>(schema: any, data: any): {
 const formatDateForSQL = (date: Date | string | null): string | null => {
     if (!date) return null;
 
-    const d = date instanceof Date ? date : new Date(date);
+    let d: Date;
+    if (typeof date === 'string') {
+        // Check if it's DD-MM-YYYY
+        const parts = date.split('-');
+        if (parts.length === 3 && parts[0].length === 2 && parts[2].length === 4) {
+            d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+        } else {
+            d = new Date(date);
+        }
+    } else {
+        d = date;
+    }
+
+    if (isNaN(d.getTime())) return null;
 
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -240,7 +253,7 @@ export const getAllSchedules = async (req: Request, res: Response) => {
         }
 
         const { status, planType, taskId, dateFrom, dateTo, search, page = 1, limit = 20, sortBy = 'Sch_Id', sortOrder = 'DESC' } = validation.data!;
-        
+
         const offset = (page - 1) * limit;
 
         let whereConditions = ['s.Sch_Del_Flag = 0'];
@@ -294,16 +307,23 @@ export const getAllSchedules = async (req: Request, res: Response) => {
                 SELECT Sch_Id, COUNT(DISTINCT Emp_Id) as empCount
                 FROM tbl_Task_Details
                 GROUP BY Sch_Id
+            ),
+            ExtensionCounts AS (
+                SELECT Sch_Id, COUNT(*) as extCount
+                FROM tbl_Project_Schedule_Extend
+                GROUP BY Sch_Id
             )
             SELECT
                 s.*, t.Task_Name, p.Plan_Type,
                 pm.Project_Name, pm.Project_Id,
-                COALESCE(tc.empCount, 0) as empCount
+                COALESCE(tc.empCount, 0) as empCount,
+                CASE WHEN COALESCE(ec.extCount, 0) > 0 THEN 1 ELSE 0 END as hasExtension
             FROM tbl_Project_Schedule s
             LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
             LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
             LEFT JOIN tbl_Sch_Plan p ON s.Sch_Plan_Id = p.Plan_Id
             LEFT JOIN TaskCounts tc ON s.Sch_Id = tc.Sch_Id
+            LEFT JOIN ExtensionCounts ec ON s.Sch_Id = ec.Sch_Id
             ${whereClause}
             ${orderClause}
             OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
@@ -326,7 +346,7 @@ export const getAllSchedules = async (req: Request, res: Response) => {
                 totalPages: 0
             });
         }
-        
+
         const scheduleIds = schedules.map(s => s.Sch_Id);
         const scheduleIdsStr = scheduleIds.join(',');
 
@@ -384,12 +404,15 @@ export const getAllSchedules = async (req: Request, res: Response) => {
             planType: schedule.Plan_Type,
             schStartDate: schedule.Sch_Start_Date,
             schEndDate: schedule.Sch_End_Date,
+            schFirstStartDate: schedule.Sch_First_Start_Date,
+            schFirstEndDate: schedule.Sch_First_End_Date,
             taskSchTimerBased: schedule.Task_Sch_Timer_Based,
             schEstStartTime: schedule.Sch_Est_Start_Time,
             schEstEndTime: schedule.Sch_Est_End_Time,
             taskSchDuration: schedule.Task_Sch_Duaration,
             schStatus: schedule.Sch_Status,
             empCount: schedule.empCount,
+            hasExtension: schedule.hasExtension,
             schCompDate: schedule.Sch_Comp_Date,
             entryBy: schedule.Entry_By,
             entryDate: schedule.Entry_Date,
@@ -616,7 +639,7 @@ export const getScheduleDetails = async (req: Request, res: Response) => {
 //             if (Sch_Plan_Id === 5) {
 //                 // PLAN 5: SPECIFIC DATES - Use ONLY the specificDates array from frontend
 //                 console.log('Plan 5 - specificDates from frontend:', specificDates);
-                
+
 //                 if (specificDates && specificDates.length > 0) {
 //                     // IMPORTANT: Use ONLY the specificDates array, ignore Sch_Start_Date and Sch_End_Date
 //                     taskDatesToInsert = specificDates
@@ -788,18 +811,7 @@ export const createSchedule = async (req: Request, res: Response) => {
             }
         }
 
-        // Check for duplicate schedule number
-        const dupCheck = await db.query(
-            `SELECT 1 FROM tbl_Project_Schedule WHERE UPPER(Sch_No) = UPPER(?) AND Sch_Del_Flag = 0`,
-            { replacements: [Sch_No], type: QueryTypes.SELECT }
-        ) as any[];
-
-        if (dupCheck.length) {
-            return res.status(409).json({
-                success: false,
-                message: 'Schedule number already exists'
-            });
-        }
+        // Duplicate check is removed since Sch_No is auto-generated with a unique ID below
 
         // Safe defaults so `undefined` never hits the SQL driver
         const safeSchType = Sch_Type ?? 1;
@@ -824,23 +836,32 @@ export const createSchedule = async (req: Request, res: Response) => {
             const nextSchId = maxIdResult[0]?.NextId;
             if (!nextSchId) throw new Error('Failed to generate next Schedule ID');
 
-            // Columns (18): Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
-            // Sch_Type, Sch_Start_Date, Sch_End_Date, Task_Sch_Timer_Based,
-            // Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration, Sch_Status,
-            // Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date
-            // Placeholders (15) + GETDATE() + 0 + Sch_Comp_Date expr = 18
+            // Auto-generate Sch_No: SCH-YYYY-MM-DD-Sch_Id
+            const d = Sch_Date ? new Date(Sch_Date) : new Date();
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const autoSchNo = `SCH-${y}-${m}-${day}-${nextSchId}`;
+
+            const Sch_First_Start_Date = validation.data!.Sch_First_Start_Date || Sch_Start_Date;
+            const Sch_First_End_Date = validation.data!.Sch_First_End_Date || Sch_End_Date;
+
+            // Columns (20): Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
+            // Sch_Type, Sch_Start_Date, Sch_End_Date, Sch_First_Start_Date, Sch_First_End_Date,
+            // Task_Sch_Timer_Based, Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
+            // Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date
             await db.query(
                 `INSERT INTO tbl_Project_Schedule
                  (Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
                   Sch_Type,
-                  Sch_Start_Date, Sch_End_Date, Task_Sch_Timer_Based,
+                  Sch_Start_Date, Sch_End_Date, Sch_First_Start_Date, Sch_First_End_Date, Task_Sch_Timer_Based,
                   Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
                   Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, ${Sch_Status === 3 ? 'GETDATE()' : 'NULL'})`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, ${Sch_Status === 3 ? 'GETDATE()' : 'NULL'})`,
                 {
                     replacements: [
                         nextSchId,
-                        Sch_No,
+                        autoSchNo,
                         formatDateForSQL(Sch_Date || new Date()),
                         Task_Id,
                         Task_Type_Id,
@@ -848,6 +869,8 @@ export const createSchedule = async (req: Request, res: Response) => {
                         safeSchType,
                         formatDateForSQL(Sch_Start_Date),
                         formatDateForSQL(Sch_End_Date),
+                        formatDateForSQL(Sch_First_Start_Date),
+                        formatDateForSQL(Sch_First_End_Date),
                         safeTimerBased,
                         safeEstStart,
                         safeEstEnd,
@@ -1026,7 +1049,8 @@ export const updateSchedule = async (req: Request, res: Response) => {
 
         // Confirm schedule exists and get current status for completion date handling
         const exists = await db.query(
-            `SELECT Sch_Plan_Id, Sch_Status FROM tbl_Project_Schedule WHERE Sch_Id = ? AND Sch_Del_Flag = 0`,
+            `SELECT Sch_Plan_Id, Sch_Status, Sch_Start_Date, Sch_End_Date, Task_Sch_Timer_Based, Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration, Sch_Type 
+             FROM tbl_Project_Schedule WHERE Sch_Id = ? AND Sch_Del_Flag = 0`,
             { replacements: [scheduleId], type: QueryTypes.SELECT }
         ) as any[];
 
@@ -1065,30 +1089,71 @@ export const updateSchedule = async (req: Request, res: Response) => {
             if (updateData.Task_Type_Id !== undefined) { updateFields.push('Task_Type_Id = ?'); updateValues.push(updateData.Task_Type_Id); }
             if (updateData.Sch_Plan_Id !== undefined) { updateFields.push('Sch_Plan_Id = ?'); updateValues.push(updateData.Sch_Plan_Id); }
             if (updateData.Sch_Type !== undefined) { updateFields.push('Sch_Type = ?'); updateValues.push(updateData.Sch_Type); }
-            if (updateData.Sch_Start_Date !== undefined) { updateFields.push('Sch_Start_Date = ?'); updateValues.push(formatDateForSQL(updateData.Sch_Start_Date)); }
-            if (updateData.Sch_End_Date !== undefined) { updateFields.push('Sch_End_Date = ?'); updateValues.push(formatDateForSQL(updateData.Sch_End_Date)); }
+            if (updateData.Sch_Start_Date !== undefined) {
+                updateFields.push('Sch_Start_Date = ?');
+                updateValues.push(formatDateForSQL(updateData.Sch_Start_Date));
+            }
+            if (updateData.Sch_First_Start_Date !== undefined) {
+                updateFields.push('Sch_First_Start_Date = ?');
+                updateValues.push(formatDateForSQL(updateData.Sch_First_Start_Date));
+            } else if (updateData.Sch_Start_Date !== undefined && !(updateData as any).isExtension) {
+                updateFields.push('Sch_First_Start_Date = ?');
+                updateValues.push(formatDateForSQL(updateData.Sch_Start_Date));
+            }
+
+            if (updateData.Sch_End_Date !== undefined) {
+                updateFields.push('Sch_End_Date = ?');
+                updateValues.push(formatDateForSQL(updateData.Sch_End_Date));
+            }
+            if (updateData.Sch_First_End_Date !== undefined) {
+                updateFields.push('Sch_First_End_Date = ?');
+                updateValues.push(formatDateForSQL(updateData.Sch_First_End_Date));
+            } else if (updateData.Sch_End_Date !== undefined && !(updateData as any).isExtension) {
+                updateFields.push('Sch_First_End_Date = ?');
+                updateValues.push(formatDateForSQL(updateData.Sch_End_Date));
+            }
             if (updateData.Task_Sch_Timer_Based !== undefined) { updateFields.push('Task_Sch_Timer_Based = ?'); updateValues.push(updateData.Task_Sch_Timer_Based ? 1 : 0); }
             if (updateData.Sch_Est_Start_Time !== undefined) { updateFields.push('Sch_Est_Start_Time = ?'); updateValues.push(updateData.Sch_Est_Start_Time); }
             if (updateData.Sch_Est_End_Time !== undefined) { updateFields.push('Sch_Est_End_Time = ?'); updateValues.push(updateData.Sch_Est_End_Time); }
             if (updateData.Task_Sch_Duaration !== undefined) { updateFields.push('Task_Sch_Duaration = ?'); updateValues.push(updateData.Task_Sch_Duaration); }
-            
+
             // Handle Sch_Status with completion date logic
             if (updateData.Sch_Status !== undefined) {
                 updateFields.push('Sch_Status = ?');
                 updateValues.push(updateData.Sch_Status);
-                
+
                 // If setting status to 3 (completed), set completion date
                 if (updateData.Sch_Status === 3) {
                     updateFields.push('Sch_Comp_Date = GETDATE()');
-                } 
+                }
                 // If changing from completed to another status, clear completion date
                 else if (currentStatus === 3 && updateData.Sch_Status !== 3) {
                     updateFields.push('Sch_Comp_Date = NULL');
                 }
             }
-            
+
             if (updateData.Update_By !== undefined) { updateFields.push('Update_By = ?'); updateValues.push(updateData.Update_By); }
             updateFields.push('Update_Date = GETDATE()');
+
+            const getCurrentValue = async (field: string): Promise<any> => {
+                const result = await db.query(
+                    `SELECT ${field} FROM tbl_Project_Schedule WHERE Sch_Id = ?`,
+                    { replacements: [scheduleId], type: QueryTypes.SELECT, transaction }
+                ) as any[];
+                return result[0]?.[field];
+            };
+
+            // Fetch OLD values BEFORE updating if this is an extension
+            let oldStartDate, oldEndDate, timerBased, estStart, estEnd, duration, schType;
+            if ((updateData as any).isExtension) {
+                oldStartDate = await getCurrentValue('Sch_Start_Date');
+                oldEndDate = await getCurrentValue('Sch_End_Date');
+                timerBased = await getCurrentValue('Task_Sch_Timer_Based');
+                estStart = await getCurrentValue('Sch_Est_Start_Time');
+                estEnd = await getCurrentValue('Sch_Est_End_Time');
+                duration = await getCurrentValue('Task_Sch_Duaration');
+                schType = await getCurrentValue('Sch_Type');
+            }
 
             if (updateFields.length > 0) {
                 updateValues.push(scheduleId);
@@ -1098,25 +1163,61 @@ export const updateSchedule = async (req: Request, res: Response) => {
                 );
             }
 
-            // Regenerate task dates when schedule configuration changes
-            const shouldRegenerate = updateData.Sch_Plan_Id !== undefined ||
+            // --- Extension Logic ---
+            if ((updateData as any).isExtension) {
+                const extStartDate = updateData.Sch_Start_Date !== undefined ? updateData.Sch_Start_Date : oldStartDate;
+                const extEndDate = updateData.Sch_End_Date !== undefined ? updateData.Sch_End_Date : oldEndDate;
+                const extTimerBased = updateData.Task_Sch_Timer_Based !== undefined ? updateData.Task_Sch_Timer_Based : timerBased;
+                const extEstStart = updateData.Sch_Est_Start_Time !== undefined ? updateData.Sch_Est_Start_Time : estStart;
+                const extEstEnd = updateData.Sch_Est_End_Time !== undefined ? updateData.Sch_Est_End_Time : estEnd;
+                const extDuration = updateData.Task_Sch_Duaration !== undefined ? updateData.Task_Sch_Duaration : duration;
+                const extSchType = updateData.Sch_Type !== undefined ? updateData.Sch_Type : schType;
+
+                await db.query(
+                    `INSERT INTO tbl_Project_Schedule_Extend
+                     (Sch_Id, Sch_EX_Start_Date, Sch_EX_End_Date, Task_Sch_Timer_Based,
+                      Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration, Sch_Type)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    {
+                        replacements: [
+                            scheduleId,
+                            extStartDate ? formatDateForSQL(extStartDate) : null,
+                            extEndDate ? formatDateForSQL(extEndDate) : null,
+                            extTimerBased ? 1 : 0,
+                            extEstStart ?? null,
+                            extEstEnd ?? null,
+                            extDuration ?? null,
+                            extSchType ?? null
+                        ],
+                        transaction
+                    }
+                );
+            }
+
+            const isExtension = (updateData as any).isExtension === true;
+            
+            // Regenerate task dates whenever the configuration changes
+            const shouldRegenerate = isExtension ||
+                updateData.Sch_Plan_Id !== undefined ||
                 updateData.Sch_Start_Date !== undefined ||
                 updateData.Sch_End_Date !== undefined ||
                 updateData.selectedDays !== undefined ||
                 updateData.specificDates !== undefined;
 
             if (shouldRegenerate) {
-                // Delete existing detail rows
+                // Fetch existing employee assignments so we can carry them over
+                const existingEmployees = await db.query(
+                    `SELECT DISTINCT Emp_Id, Project_Id, Task_Levl_Id, Task_Id, Assigned_Emp_Id, Ord_By, Invovled_Stat 
+                     FROM tbl_Task_Details WHERE Sch_Id = ?`,
+                    { replacements: [scheduleId], type: QueryTypes.SELECT, transaction }
+                ) as any[];
+
+                // Delete existing schedule config detail rows
                 await db.query(`DELETE FROM tbl_Project_Sch_DT WHERE Sch_Id = ?`, { replacements: [scheduleId], transaction });
                 await db.query(`DELETE FROM tbl_Project_Sch_Task_DT WHERE Sch_Id = ?`, { replacements: [scheduleId], transaction });
-
-                const getCurrentValue = async (field: string): Promise<any> => {
-                    const result = await db.query(
-                        `SELECT ${field} FROM tbl_Project_Schedule WHERE Sch_Id = ?`,
-                        { replacements: [scheduleId], type: QueryTypes.SELECT, transaction }
-                    ) as any[];
-                    return result[0]?.[field];
-                };
+                
+                // Delete tbl_Task_Details entirely because we regenerate them for all new dates
+                await db.query(`DELETE FROM tbl_Task_Details WHERE Sch_Id = ?`, { replacements: [scheduleId], transaction });
 
                 const planId = updateData.Sch_Plan_Id !== undefined ? updateData.Sch_Plan_Id : currentPlanId;
                 const startDate = updateData.Sch_Start_Date !== undefined ? updateData.Sch_Start_Date : await getCurrentValue('Sch_Start_Date');
@@ -1136,31 +1237,58 @@ export const updateSchedule = async (req: Request, res: Response) => {
 
                 if (planId === 5) {
                     // PLAN 5: SPECIFIC DATES - Use ONLY specificDates array
-                    console.log('Update - Plan 5 specificDates from frontend:', specificDatesArray);
-                    
                     if (specificDatesArray.length > 0) {
                         taskDatesToInsert = specificDatesArray
-                            .filter(ds => ds && /^\d{4}-\d{2}-\d{2}$/.test(ds))
-                            .map(ds => parseDateString(ds));
-                        console.log(`Update - Plan 5: Using ${taskDatesToInsert.length} specific dates (IGNORING start/end dates)`);
+                            .filter((ds: string) => ds && /^\d{4}-\d{2}-\d{2}$/.test(ds))
+                            .map((ds: string) => parseDateString(ds));
                     } else if (startDate) {
                         taskDatesToInsert = [new Date(startDate)];
-                        console.log(`Update - Plan 5: No specific dates, using start date as fallback`);
                     }
                 } else if (startDate && endDate) {
                     taskDatesToInsert = generateTaskDates(
-                        new Date(startDate), 
+                        new Date(startDate),
                         new Date(endDate),
-                        planId, 
-                        selectedDaysArray, 
-                        updateData.planDetails, 
+                        planId,
+                        selectedDaysArray,
+                        updateData.planDetails,
                         []
                     );
                 }
 
                 if (taskDatesToInsert.length > 0) {
                     await insertTaskDates(db, scheduleId, taskDatesToInsert, estStartTime, estEndTime, transaction);
-                    console.log(`Update - Inserted ${taskDatesToInsert.length} task dates`);
+
+                    if (existingEmployees.length > 0) {
+                        const anNoRes = await db.query(
+                            `SELECT ISNULL(MAX(AN_No), 0) AS maxANNo FROM tbl_Task_Details`,
+                            { type: QueryTypes.SELECT, transaction }
+                        ) as any[];
+                        let nextANNo = (anNoRes[0]?.maxANNo || 0);
+
+                        for (const emp of existingEmployees) {
+                            for (const tDate of taskDatesToInsert) {
+                                nextANNo++;
+                                await db.query(
+                                    `INSERT INTO tbl_Task_Details
+                                     (AN_No, Project_Id, Sch_Id, Task_Levl_Id, Task_Id, Assigned_Emp_Id, Emp_Id, 
+                                      Task_Assign_dt, Sch_Time, EN_Time, Ord_By, Invovled_Stat)
+                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                    {
+                                        replacements: [
+                                            nextANNo, emp.Project_Id, scheduleId, emp.Task_Levl_Id, emp.Task_Id,
+                                            emp.Assigned_Emp_Id, emp.Emp_Id, formatDateForSQL(tDate),
+                                            estStartTime, estEndTime, emp.Ord_By, emp.Invovled_Stat
+                                        ],
+                                        type: QueryTypes.INSERT,
+                                        transaction
+                                    }
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    // No dates generated, delete all assignments
+                    await db.query(`DELETE FROM tbl_Task_Details WHERE Sch_Id = ?`, { replacements: [scheduleId], transaction });
                 }
             }
 
@@ -1199,15 +1327,18 @@ export const updateSchedule = async (req: Request, res: Response) => {
             throw error;
         }
 
-    } catch (e) {
+    } catch (e: any) {
         console.error('Update Schedule Error:', e);
         if (transaction && isTransactionActive) {
             try { await transaction.rollback(); isTransactionActive = false; } catch (err) { console.error('Final rollback error:', err); }
         }
+
+        const sqlErrorMsg = e?.original?.message || e?.parent?.message || e?.message || 'Unknown error';
+
         return res.status(500).json({
             success: false,
-            message: 'Failed to update schedule',
-            error: e instanceof Error ? e.message : 'Unknown error',
+            message: `Failed to update schedule: ${sqlErrorMsg}`,
+            error: sqlErrorMsg,
             stack: process.env.NODE_ENV === 'development' ? (e instanceof Error ? e.stack : undefined) : undefined
         });
     }
@@ -1400,11 +1531,18 @@ export const getAllActiveSchedules = async (req: Request, res: Response) => {
         console.log(`📊 Getting active schedules from database: ${currentDBName}`);
 
         const rows = await db.query(
-            `SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
+            `WITH ExtensionCounts AS (
+                SELECT Sch_Id, COUNT(*) as extCount
+                FROM tbl_Project_Schedule_Extend
+                GROUP BY Sch_Id
+             )
+             SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id,
+                    CASE WHEN COALESCE(ec.extCount, 0) > 0 THEN 1 ELSE 0 END as hasExtension
              FROM tbl_Project_Schedule s
              LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
              LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
              LEFT JOIN tbl_Sch_Plan p ON s.Sch_Plan_Id = p.Plan_Id
+             LEFT JOIN ExtensionCounts ec ON s.Sch_Id = ec.Sch_Id
              WHERE s.Sch_Del_Flag = 0 AND s.Sch_Status = 1
              ORDER BY s.Sch_Date DESC`,
             { type: QueryTypes.SELECT }
@@ -1413,6 +1551,60 @@ export const getAllActiveSchedules = async (req: Request, res: Response) => {
         sentData(res, rows);
     } catch (e) {
         console.error('Error in getAllActiveSchedules:', e);
+        servError(e, res);
+    }
+};
+
+export const getExtensionsByScheduleId = async (req: Request, res: Response) => {
+    try {
+        const db = getDb(req);
+        const currentDBName = getCurrentDatabaseName(req);
+        console.log(`📊 Getting extensions from database: ${currentDBName}`);
+
+        const idCheck = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
+        if (!idCheck.success) {
+            return res.status(400).json({ success: false, errors: idCheck.errors });
+        }
+
+        const scheduleId = idCheck.data!.id;
+
+        const rows = await db.query(
+            `SELECT * FROM tbl_Project_Schedule_Extend WHERE Sch_Id = ?`,
+            { replacements: [scheduleId], type: QueryTypes.SELECT }
+        ) as any[];
+
+        const finalRows: any[] = [];
+        for (let r of rows) {
+            const row = { ...r };
+            // Case-insensitive key lookup
+            const keys = Object.keys(row);
+            const getVal = (keyName: string) => {
+                const k = keys.find(x => x.toLowerCase() === keyName.toLowerCase());
+                return k ? row[k] : null;
+            };
+
+            const startDate = getVal('Sch_EX_Start_Date');
+            const endDate = getVal('Sch_EX_End_Date');
+
+            try {
+                const emps = await db.query(
+                    `SELECT DISTINCT e.Emp_First_Name
+                     FROM tbl_Task_Details td
+                     JOIN tbl_Employee_Master e ON td.Emp_Id = e.Emp_Id
+                     WHERE td.Sch_Id = ? AND CAST(td.Task_Assign_dt AS DATE) >= CAST(? AS DATE) AND CAST(td.Task_Assign_dt AS DATE) <= CAST(? AS DATE)`,
+                     { replacements: [scheduleId, startDate, endDate], type: QueryTypes.SELECT }
+                ) as any[];
+                row.Employee_Names = emps.map(e => (e.Emp_First_Name || e.emp_first_name)).filter(Boolean).join(', ') || '-';
+            } catch (err: any) {
+                console.error("Employee lookup failed:", err.message);
+                row.Employee_Names = "Lookup Failed";
+            }
+            finalRows.push(row);
+        }
+
+        sentData(res, finalRows);
+    } catch (e) {
+        console.error('Error in getExtensionsByScheduleId:', e);
         servError(e, res);
     }
 };

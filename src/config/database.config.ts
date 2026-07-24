@@ -251,8 +251,8 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
 export async function getUserDatabaseConnectionFromToken(token: string): Promise<Sequelize> {
     const session = verifyTokenSession(token);
     if (!session) throw new Error('Invalid or expired token');
-    if (session.dbName) return getCompanyDatabase(session.dbName);
     if (session.companyId) return getCompanyDatabase(session.companyId);
+    if (session.dbName) return getCompanyDatabase(session.dbName);
     return getDefaultConnection();
 }
 

@@ -645,7 +645,8 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
             });
         }
 
-        const updateData = bodyValidation.data!;
+        const updateData = { ...bodyValidation.data! };
+        delete updateData.taskDates;
 
         const taskDetail = await TaskDetailModel.findByPk(id);
         
@@ -859,11 +860,13 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
             Task_Levl_Id,
             Assigned_Emp_Id,
             Ord_By,
-            Invovled_Stat
+            Invovled_Stat,
+            taskDates,
+            employeeDates
         } = validation.data!;
 
         // Fetch data from tbl_Project_Sch_Task_DT based on Sch_Id
-        const scheduleTaskData: any[] = await companyDB.query(
+        let scheduleTaskData: any[] = await companyDB.query(
             `SELECT 
                 Task_Work_Date,
                 Task_Start_Time,
@@ -878,13 +881,132 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
             }
         );
 
-        if (!scheduleTaskData || scheduleTaskData.length === 0) {
-            await transaction.rollback();
-            return res.status(404).json({
-                success: false,
-                message: `No schedule task data found for Sch_Id: ${Sch_Id}`
+        if (scheduleTaskData && scheduleTaskData.length > 0 && taskDates && taskDates.length > 0) {
+            scheduleTaskData = scheduleTaskData.filter(task => {
+                let taskDateStr = "";
+                if (typeof task.Task_Work_Date === 'string') {
+                    taskDateStr = task.Task_Work_Date.split('T')[0];
+                } else {
+                    const d = new Date(task.Task_Work_Date);
+                    const offset = d.getTimezoneOffset() * 60000;
+                    taskDateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+                }
+                const fallbackStr = new Date(task.Task_Work_Date).toISOString().split('T')[0];
+                return taskDates.includes(taskDateStr) || taskDates.includes(fallbackStr);
             });
         }
+
+        // Always fetch the master data to use as a fallback for missing times
+        const schMasterData: any[] = await companyDB.query(
+            `SELECT Sch_Start_Date, Sch_Est_Start_Time, Sch_Est_End_Time FROM tbl_Project_Schedule WHERE Sch_Id = :schId`,
+            { replacements: { schId: Sch_Id }, type: 'SELECT', transaction }
+        );
+        const masterEstStart = (schMasterData && schMasterData.length > 0) ? schMasterData[0].Sch_Est_Start_Time : null;
+        const masterEstEnd = (schMasterData && schMasterData.length > 0) ? schMasterData[0].Sch_Est_End_Time : null;
+
+        // If after filtering (or if it was initially empty) we have nothing, but taskDates were provided, generate them
+        if ((!scheduleTaskData || scheduleTaskData.length === 0) && taskDates && taskDates.length > 0) {
+             scheduleTaskData = taskDates.map(dateStr => ({
+                 Task_Work_Date: dateStr,
+                 Task_Start_Time: masterEstStart,
+                 Task_End_Time: masterEstEnd
+             }));
+        }
+
+        // Fallback to schedule start date if no dates found and no dates provided
+        if (!scheduleTaskData || scheduleTaskData.length === 0) {
+            if (schMasterData && schMasterData.length > 0 && schMasterData[0].Sch_Start_Date) {
+                 scheduleTaskData = [{
+                     Task_Work_Date: schMasterData[0].Sch_Start_Date,
+                     Task_Start_Time: masterEstStart,
+                     Task_End_Time: masterEstEnd
+                 }];
+            }
+        }
+
+        // Ensure any existing rows that have null times get the defaults
+        if (scheduleTaskData && scheduleTaskData.length > 0) {
+            scheduleTaskData = scheduleTaskData.map(t => ({
+                ...t,
+                Task_Start_Time: t.Task_Start_Time || masterEstStart,
+                Task_End_Time: t.Task_End_Time || masterEstEnd
+            }));
+        }
+
+        if (!scheduleTaskData || scheduleTaskData.length === 0) {
+            if (Emp_Ids && Emp_Ids.length > 0) {
+                await transaction.rollback();
+                return res.status(404).json({
+                    success: false,
+                    message: `No schedule task data found for Sch_Id: ${Sch_Id}`
+                });
+            } else {
+                // If there's no scheduleTaskData AND no employees, it's just a clear operation.
+                scheduleTaskData = [];
+            }
+        }
+
+        // --- DELETE removed dates and unselected employees ---
+        const existingAssignments: any[] = await companyDB.query(
+            `SELECT Id, Emp_Id, Task_Assign_dt FROM tbl_Task_Details WHERE Sch_Id = :schId AND Task_Id = :taskId`,
+            {
+                replacements: { schId: Sch_Id, taskId: Task_Id },
+                transaction,
+                type: 'SELECT'
+            }
+        );
+
+        const deleteIds: number[] = [];
+        for (const row of existingAssignments) {
+            // If employee is no longer selected at all, delete their assignment
+            if (!Emp_Ids || !Emp_Ids.includes(row.Emp_Id)) {
+                deleteIds.push(row.Id);
+                continue;
+            }
+
+            // Otherwise, check if the date is still valid
+            let rowDateStr = "";
+            if (typeof row.Task_Assign_dt === 'string') {
+                rowDateStr = row.Task_Assign_dt.split('T')[0].split(' ')[0]; // Handles both '2026-07-22' and '2026-07-22 00:00:00'
+            } else {
+                const d = new Date(row.Task_Assign_dt);
+                const offset = d.getTimezoneOffset() * 60000;
+                rowDateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+            }
+
+            // Figure out valid dates for this specific employee
+            let empValidDateStrings: string[] = [];
+            if (employeeDates && employeeDates[row.Emp_Id.toString()]) {
+                empValidDateStrings = employeeDates[row.Emp_Id.toString()] as string[];
+            } else if (scheduleTaskData && scheduleTaskData.length > 0) {
+                empValidDateStrings = scheduleTaskData.map(t => {
+                    let taskDateStr = "";
+                    if (typeof t.Task_Work_Date === 'string') {
+                        taskDateStr = t.Task_Work_Date.split('T')[0];
+                    } else {
+                        const d = new Date(t.Task_Work_Date);
+                        const offset = d.getTimezoneOffset() * 60000;
+                        taskDateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+                    }
+                    return taskDateStr;
+                });
+            }
+
+            if (!empValidDateStrings.includes(rowDateStr)) {
+                deleteIds.push(row.Id);
+            }
+        }
+
+        if (deleteIds.length > 0) {
+            const placeholders = deleteIds.join(',');
+            await companyDB.query(
+                `DELETE FROM tbl_Task_Details WHERE Id IN (${placeholders})`,
+                {
+                    transaction
+                }
+            );
+        }
+        // --- END DELETE ---
 
         // Get the current max AN_No to generate next values
         const maxAnNoResult: any = await companyDB.query(
@@ -900,21 +1022,46 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
 
         // For each employee and each schedule task record, create a task detail
         for (let i = 0; i < Emp_Ids.length; i++) {
-            for (let j = 0; j < scheduleTaskData.length; j++) {
-                const taskRecord = scheduleTaskData[j] as ScheduleTaskData;
+            const currentEmpId = Emp_Ids[i];
+            let empScheduleTaskData = scheduleTaskData;
+
+            if (employeeDates && employeeDates[currentEmpId.toString()]) {
+                const customDates = employeeDates[currentEmpId.toString()] as string[];
+                empScheduleTaskData = scheduleTaskData.filter(task => {
+                    let taskDateStr = "";
+                    if (typeof task.Task_Work_Date === 'string') {
+                        taskDateStr = task.Task_Work_Date.split('T')[0];
+                    } else {
+                        const d = new Date(task.Task_Work_Date);
+                        const offset = d.getTimezoneOffset() * 60000;
+                        taskDateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+                    }
+                    const fallbackStr = new Date(task.Task_Work_Date).toISOString().split('T')[0];
+                    return customDates.includes(taskDateStr) || customDates.includes(fallbackStr);
+                });
+            }
+
+            for (let j = 0; j < empScheduleTaskData.length; j++) {
+                const taskRecord = empScheduleTaskData[j] as ScheduleTaskData;
+                const twd: any = taskRecord.Task_Work_Date;
+                const recordDateStr = typeof twd === 'string' 
+                    ? twd.substring(0, 10) 
+                    : new Date(twd).toISOString().substring(0, 10);
                 
-                // Check if duplicate exists for Sch_Id, Emp_Id, and Task_Assign_dt (date only)
+                // Check if duplicate exists for Sch_Id, Emp_Id, Task_Id and Task_Assign_dt (date only)
                 const checkDuplicate: any[] = await companyDB.query(
                     `SELECT Id FROM tbl_Task_Details 
                      WHERE Sch_Id = :schId 
                        AND Emp_Id = :empId 
+                       AND Task_Id = :taskId
                        AND Task_Assign_dt >= CAST(:taskAssignDt AS DATETIME)
                    AND Task_Assign_dt < DATEADD(day, 1, CAST(:taskAssignDt AS DATETIME))`,
                     {
                         replacements: {
                             schId: Sch_Id,
-                            empId: Emp_Ids[i],
-                            taskAssignDt: taskRecord.Task_Work_Date
+                            empId: currentEmpId,
+                            taskId: Task_Id,
+                            taskAssignDt: recordDateStr
                         },
                         transaction,
                         type: 'SELECT'
@@ -946,7 +1093,7 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
                             Task_Id,
                             Assigned_Emp_Id || null,
                             Emp_Ids[i],
-                            taskRecord.Task_Work_Date,
+                            recordDateStr,
                             taskRecord.Task_Start_Time,
                             taskRecord.Task_End_Time,
                             Ord_By || null,
@@ -1001,7 +1148,11 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
         });
 
     } catch (error: any) {
-        await transaction.rollback();
+        try {
+            await transaction.rollback();
+        } catch (rollbackError) {
+            console.error("Error rolling back transaction:", rollbackError);
+        }
         console.error("Error creating task details:", error);
         return res.status(500).json({
             success: false,
@@ -1015,7 +1166,7 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
     const transaction = await companyDB.transaction();
 
     try {
-        const { projectId, schId, taskId, empId, Ord_By, Invovled_Stat } = req.body;
+        const { projectId, schId, taskId, empId, Ord_By, Invovled_Stat, taskDates } = req.body;
 
         if (!projectId || !schId || !taskId || !empId) {
             await transaction.rollback();
@@ -1026,7 +1177,7 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
         }
 
         // Fetch data from tbl_Project_Sch_Task_DT based on schId
-        const scheduleTaskData: any[] = await companyDB.query(
+        let scheduleTaskData: any[] = await companyDB.query(
             `SELECT 
                 Task_Work_Date,
                 Task_Start_Time,
@@ -1040,6 +1191,57 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
                 transaction
             }
         );
+
+        if (scheduleTaskData && scheduleTaskData.length > 0 && taskDates && taskDates.length > 0) {
+            scheduleTaskData = scheduleTaskData.filter(task => {
+                let taskDateStr = "";
+                if (typeof task.Task_Work_Date === 'string') {
+                    taskDateStr = task.Task_Work_Date.split('T')[0];
+                } else {
+                    const d = new Date(task.Task_Work_Date);
+                    const offset = d.getTimezoneOffset() * 60000;
+                    taskDateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+                }
+                const fallbackStr = new Date(task.Task_Work_Date).toISOString().split('T')[0];
+                return taskDates.includes(taskDateStr) || taskDates.includes(fallbackStr);
+            });
+        }
+
+        // Always fetch the master data to use as a fallback for missing times
+        const schMasterData: any[] = await companyDB.query(
+            `SELECT Sch_Start_Date, Sch_Est_Start_Time, Sch_Est_End_Time FROM tbl_Project_Schedule WHERE Sch_Id = :schId`,
+            { replacements: { schId }, type: 'SELECT', transaction }
+        );
+        const masterEstStart = (schMasterData && schMasterData.length > 0) ? schMasterData[0].Sch_Est_Start_Time : null;
+        const masterEstEnd = (schMasterData && schMasterData.length > 0) ? schMasterData[0].Sch_Est_End_Time : null;
+
+        if ((!scheduleTaskData || scheduleTaskData.length === 0) && taskDates && taskDates.length > 0) {
+            scheduleTaskData = taskDates.map((dateStr: string) => ({
+                Task_Work_Date: new Date(dateStr),
+                Task_Start_Time: masterEstStart,
+                Task_End_Time: masterEstEnd
+            }));
+        }
+
+        // Fallback to schedule start date if no dates found and no dates provided
+        if (!scheduleTaskData || scheduleTaskData.length === 0) {
+            if (schMasterData && schMasterData.length > 0 && schMasterData[0].Sch_Start_Date) {
+                 scheduleTaskData = [{
+                     Task_Work_Date: schMasterData[0].Sch_Start_Date,
+                     Task_Start_Time: masterEstStart,
+                     Task_End_Time: masterEstEnd
+                 }];
+            }
+        }
+
+        // Ensure any existing rows that have null times get the defaults
+        if (scheduleTaskData && scheduleTaskData.length > 0) {
+            scheduleTaskData = scheduleTaskData.map(t => ({
+                ...t,
+                Task_Start_Time: t.Task_Start_Time || masterEstStart,
+                Task_End_Time: t.Task_End_Time || masterEstEnd
+            }));
+        }
 
         if (!scheduleTaskData || scheduleTaskData.length === 0) {
             await transaction.rollback();
@@ -1141,7 +1343,7 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
                         replacements: {
                             schId,
                             empId,
-                            taskAssignDt: taskRecord.Task_Work_Date
+                            taskAssignDt: recordDate
                         },
                         transaction,
                         type: 'SELECT'
@@ -1168,7 +1370,7 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
                             schId,
                             taskId,
                             empId,
-                            taskRecord.Task_Work_Date,
+                            recordDate,
                             taskRecord.Task_Start_Time,
                             taskRecord.Task_End_Time,
                             Ord_By || null,

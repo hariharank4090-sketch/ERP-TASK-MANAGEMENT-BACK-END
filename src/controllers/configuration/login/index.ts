@@ -130,8 +130,9 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             const rowCompanyId: number | null = row.Company_Id;
             const rowLocalUserId: number | null = row.Local_User_ID;
             const rowUserTypeId: number | null = row.UserTypeId ?? null;
-            const rowCompanyName: string = row.Company_Name ?? '';
-            const rowDbName: string = row.DB_Name ?? '';
+            const envConfig = rowCompanyId ? getCompanyConfig(rowCompanyId) : null;
+            const rowCompanyName: string = envConfig?.name || row.Company_Name || '';
+            const rowDbName: string = envConfig?.database || row.DB_Name || '';
 
             if (!rowCompanyId || !rowDbName) return null;
 
@@ -481,10 +482,11 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
         const currentCompany = userCompanies
             .map(u => {
                 const uData = u.get({ plain: true }) as any;
+                const envConfig = u.Company_Id ? getCompanyConfig(u.Company_Id) : null;
                 return {
                     companyId:   u.Company_Id,
-                    companyName: uData.Company?.Company_Name ?? '',
-                    dbName:      uData.Company?.DB_Name ?? '',
+                    companyName: envConfig?.name || uData.Company?.Company_Name || '',
+                    dbName:      envConfig?.database || uData.Company?.DB_Name || '',
                     token:       u.Autheticate_Id ?? '',    // each company's own token
                     dbConnected: true,
                 };
