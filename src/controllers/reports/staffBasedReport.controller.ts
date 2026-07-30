@@ -31,5 +31,3 @@ export const StaffBasedReport = async (req: Request, res: Response) => {
         servError(error, res);
     }
 }
-
-
