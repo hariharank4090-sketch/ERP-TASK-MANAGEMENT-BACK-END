@@ -15,6 +15,7 @@ import {
     searchEmployees,
     getEmployeeCount,
     getEmployeesBySalaryRange,
+    getAllDesignations,
 } from '../../controllers/masters/taskManagement/employeemaster.controller';
 import { authenticate, authorize } from '../../middleware/auth';
 
@@ -807,6 +808,47 @@ router.get('/', authenticate, authorize([]), getAllEmployees);
  *         description: Internal server error
  */
 router.get('/active', authenticate, authorize([]), getActiveEmployees);
+
+/**
+ * @swagger
+ * /api/masters/employees/designations:
+ *   get:
+ *     summary: Get all employee designations
+ *     description: Returns a list of all employee designations (Designation_Id and Designation) from tbl_Employee_Designation.
+ *     tags: [Employee Master]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Designations retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Designations fetched successfully"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       Designation_Id:
+ *                         type: integer
+ *                         example: 1
+ *                       Designation:
+ *                         type: string
+ *                         example: "Software Engineer"
+ *       401:
+ *         description: Unauthorized - No token provided
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/designations', authenticate, authorize([]), getAllDesignations);
 
 /**
  * @swagger

@@ -579,4 +579,41 @@ export function initEmployeeModel(sequelize: Sequelize): typeof Employee {
     return Employee;
 }
 
+export interface EmployeeDesignationAttributes {
+    Designation_Id: number;
+    Designation: string | null;
+}
+
+export type EmployeeDesignationCreationAttributes = Optional<EmployeeDesignationAttributes, 'Designation_Id'>;
+
+export class EmployeeDesignation extends Model<EmployeeDesignationAttributes, EmployeeDesignationCreationAttributes> implements EmployeeDesignationAttributes {
+    public Designation_Id!: number;
+    public Designation!: string | null;
+}
+
+export function initEmployeeDesignationModel(sequelize: Sequelize): typeof EmployeeDesignation {
+    EmployeeDesignation.init(
+        {
+            Designation_Id: {
+                type: DataTypes.INTEGER,
+                primaryKey: true,
+                autoIncrement: true,
+                field: 'Designation_Id'
+            },
+            Designation: {
+                type: DataTypes.STRING(255),
+                allowNull: true,
+                field: 'Designation'
+            }
+        },
+        {
+            sequelize,
+            tableName: 'tbl_Employee_Designation',
+            modelName: 'EmployeeDesignation',
+            timestamps: false
+        }
+    );
+    return EmployeeDesignation;
+}
+
 export default Employee;

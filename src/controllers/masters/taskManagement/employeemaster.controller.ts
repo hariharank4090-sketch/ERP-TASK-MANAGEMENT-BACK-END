@@ -13,6 +13,7 @@ import {
 } from '../../../responseObject';
 import {
     initEmployeeModel,
+    initEmployeeDesignationModel,
     employeeCreateSchema,
     employeeUpdateSchema,
     employeeQuerySchema,
@@ -75,6 +76,12 @@ const getEmployeeModel = (req: Request) => {
     const sequelize = (req as any).companyDB;
     if (!sequelize) throw new Error('Database connection not available');
     return initEmployeeModel(sequelize);
+};
+
+const getDesignationModel = (req: Request) => {
+    const sequelize = (req as any).companyDB;
+    if (!sequelize) throw new Error('Database connection not available');
+    return initEmployeeDesignationModel(sequelize);
 };
 
 const cleanMobileNumber = (mobileNo: string | null | undefined): string | null => {
@@ -1099,6 +1106,28 @@ export const getCurrentPermissions = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error('Error getting permissions:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET ALL DESIGNATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+export const getAllDesignations = async (req: Request, res: Response) => {
+    try {
+        const DesignationModel = getDesignationModel(req);
+        const designations = await DesignationModel.findAll({
+            attributes: ['Designation_Id', 'Designation'],
+            limit: 1000,
+            order: [['Designation', 'ASC']]
+        });
+        return res.status(200).json({
+            success: true,
+            message: 'Designations fetched successfully',
+            data: designations
+        });
+    } catch (error: any) {
+        console.error('Error fetching designations:', error);
         return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
