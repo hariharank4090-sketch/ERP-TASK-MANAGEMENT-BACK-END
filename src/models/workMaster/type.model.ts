@@ -55,6 +55,7 @@ export const workParameterSchema = z.object({
  * The DB generates it automatically (IDENTITY column or sequence).
  */
 export const workMasterCreateSchema = z.object({
+    Work_Id: z.number().positive().optional().nullable(),
     Sch_Id: z.number().positive('Schedule ID must be a positive number'),
     Task_Id: z.number().positive('Task ID must be a positive number'),
     Emp_Id: z.number().positive('Employee ID must be a positive number'),

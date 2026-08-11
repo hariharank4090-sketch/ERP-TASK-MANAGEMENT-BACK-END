@@ -297,24 +297,17 @@ const checkExistingWork = async (
     workDt: Date,
     transaction: Transaction
 ): Promise<any | null> => {
-    const toSqlDateTime = (d: Date) =>
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ` +
-        `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.000`;
-
-    const startOfDay = toSqlDateTime(workDt);
-    const nextDay = new Date(workDt);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const endOfDay = toSqlDateTime(nextDay);
+    // Format the date exactly as YYYY-MM-DD
+    const dateStr = workDt.toISOString().split('T')[0];
 
     const result = await sequelizeInstance.query(
         `SELECT SNo, Work_Id FROM tbl_Work_Master 
          WHERE Sch_Id = :schId 
            AND Task_Id = :taskId 
            AND Emp_Id = :empId 
-           AND Work_Dt >= :startOfDay
-           AND Work_Dt < :endOfDay`,
+           AND CONVERT(varchar, Work_Dt, 23) = :dateStr`,
         {
-            replacements: { schId, taskId, empId, startOfDay, endOfDay },
+            replacements: { schId, taskId, empId, dateStr },
             type: QueryTypes.SELECT,
             transaction
         }
