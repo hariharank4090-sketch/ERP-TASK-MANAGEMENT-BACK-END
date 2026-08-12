@@ -477,26 +477,8 @@ export const createWork = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'Invalid Sch_Id. Schedule does not exist.' });
         }
 
-        const existingWork = await checkExistingWork(
-            sequelizeInstance,
-            data.Sch_Id,
-            data.Task_Id,
-            data.Emp_Id,
-            workDate,
-            transaction
-        );
-
-        let sno: number;
-        let isUpdate = false;
-
-        if (existingWork) {
-            await updateExistingWork(sequelizeInstance, existingWork.SNo, existingWork.Work_Id, data, transaction);
-            sno = existingWork.SNo;
-            isUpdate = true;
-        } else {
-            const nextWorkId = await getNextWorkId(sequelizeInstance, transaction);
-            sno = await insertNewWork(sequelizeInstance, data, nextWorkId, workDate, transaction);
-        }
+        const nextWorkId = await getNextWorkId(sequelizeInstance, transaction);
+        const sno = await insertNewWork(sequelizeInstance, data, nextWorkId, workDate, transaction);
 
         await transaction.commit();
 
@@ -505,12 +487,9 @@ export const createWork = async (req: Request, res: Response) => {
             { replacements: { sno }, type: QueryTypes.SELECT }
         );
 
-        const message = isUpdate ? 'Work updated successfully' : 'Work created successfully';
-        const statusCode = isUpdate ? 200 : 201;
-
-        return res.status(statusCode).json({
+        return res.status(201).json({
             success: true,
-            message,
+            message: 'Work created successfully',
             data: result.length ? formatWorkRow(result[0], 0) : null
         });
 
@@ -557,6 +536,63 @@ export const updateWork = async (req: Request, res: Response) => {
         }
 
         const data = bodyValidation.data!;
+
+        // Check if Work_Dt has changed. If it has, create a new row instead of updating.
+        const getDateStringOnly = (val: any): string => {
+            if (!val) return '';
+            if (typeof val === 'string') {
+                const match = val.match(/^(\d{4}-\d{2}-\d{2})/);
+                if (match) return match[1];
+            }
+            try {
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) {
+                    const yyyy = d.getFullYear();
+                    const mm = String(d.getMonth() + 1).padStart(2, '0');
+                    const dd = String(d.getDate()).padStart(2, '0');
+                    return `${yyyy}-${mm}-${dd}`;
+                }
+            } catch { /* ignore */ }
+            return '';
+        };
+
+        const existingDateStr = getDateStringOnly(existingWork.Work_Dt);
+        const newDateStr = data.Work_Dt ? getDateStringOnly(data.Work_Dt) : existingDateStr;
+
+        if (data.Work_Dt !== undefined && data.Work_Dt !== null && newDateStr !== existingDateStr) {
+            const nextWorkId = await getNextWorkId(sequelizeInstance, transaction);
+            
+            const insertData: WorkMasterCreateInput = {
+                Sch_Id: data.Sch_Id !== undefined ? data.Sch_Id : Number(existingWork.Sch_Id),
+                Task_Id: data.Task_Id !== undefined ? data.Task_Id : Number(existingWork.Task_Id),
+                Emp_Id: data.Emp_Id !== undefined ? data.Emp_Id : Number(existingWork.Emp_Id),
+                Work_Dt: data.Work_Dt,
+                Work_Done: data.Work_Done !== undefined ? data.Work_Done : existingWork.Work_Done,
+                Start_Time: data.Start_Time !== undefined ? data.Start_Time : (existingWork.Start_Time ? new Date(existingWork.Start_Time) : null),
+                End_Time: data.End_Time !== undefined ? data.End_Time : (existingWork.End_Time ? new Date(existingWork.End_Time) : null),
+                Tot_Minutes: data.Tot_Minutes !== undefined ? data.Tot_Minutes : existingWork.Tot_Minutes,
+                Work_Status: data.Work_Status !== undefined ? data.Work_Status : existingWork.Work_Status,
+                Entry_By: data.Update_By !== undefined ? data.Update_By : existingWork.Entry_By,
+                Process_Id: data.Process_Id !== undefined ? data.Process_Id : existingWork.Process_Id,
+                Parameters: data.Parameters !== undefined ? data.Parameters : []
+            };
+
+            const newSno = await insertNewWork(sequelizeInstance, insertData, nextWorkId, data.Work_Dt, transaction);
+
+            await transaction.commit();
+
+            const result = await sequelizeInstance.query<WorkWithDetails>(
+                `${WORK_DETAIL_SELECT} WHERE wm.SNo = :sno`,
+                { replacements: { sno: newSno }, type: QueryTypes.SELECT }
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: 'Work saved as new entry successfully',
+                data: result.length ? formatWorkRow(result[0], 0) : null
+            });
+        }
+
         const setClauses: string[] = [];
         const replacements: any = { id };
 
