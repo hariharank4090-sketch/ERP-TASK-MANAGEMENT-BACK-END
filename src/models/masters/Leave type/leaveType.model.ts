@@ -40,7 +40,7 @@ export const leaveTypeQuerySchema = z.object({
 export const leaveTypeIdSchema = z.object({
     id: z.coerce.number()
         .int()
-        .positive('Valid ID is required')
+        .min(0, 'Valid ID is required')
 });
 
 export type LeaveTypeCreateInput = z.infer<typeof leaveTypeCreateSchema>;

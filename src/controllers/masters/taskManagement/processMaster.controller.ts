@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { ZodError } from 'zod';
 import {
     created,
@@ -271,12 +271,41 @@ export const createProcessMaster = async (req: Request, res: Response) => {
             });
         }
 
-        // Prepare process data
-        const finalProcessData: any = {
-            Process_Name: processData.Process_Name.trim()
-        };
+        const sequelizeInstance = (req as any).companyDB;
 
-        const process = await Process.create(finalProcessData);
+        // Dynamically check if tbl_Process_Master has the IDENTITY property on Id in the current company's database
+        const isIdentityResult = await sequelizeInstance.query(
+            `SELECT COLUMNPROPERTY(OBJECT_ID('tbl_Process_Master'), 'Id', 'IsIdentity') AS IsIdentity`,
+            { type: QueryTypes.SELECT }
+        ) as any[];
+
+        const isIdentity = isIdentityResult.length && isIdentityResult[0].IsIdentity === 1;
+
+        let process: any;
+        if (!isIdentity) {
+            // Non-identity column (e.g. ERP_LIVE_DB_SMT) - Manually get next Id and use raw SQL insert to bypass Sequelize's SET IDENTITY_INSERT wrapping
+            const maxIdResult = await sequelizeInstance.query(
+                `SELECT ISNULL(MAX(Id), 0) + 1 as NextId FROM tbl_Process_Master`,
+                { type: QueryTypes.SELECT }
+            ) as any[];
+            const nextId = maxIdResult[0].NextId;
+
+            await sequelizeInstance.query(
+                `INSERT INTO tbl_Process_Master (Id, Process_Name) VALUES (:id, :name)`,
+                {
+                    replacements: { id: nextId, name: processData.Process_Name.trim() },
+                    type: QueryTypes.INSERT
+                }
+            );
+
+            // Fetch the created record to return it formatted
+            process = await Process.findByPk(nextId);
+        } else {
+            // Identity column (e.g. ERP_LIVE_DB_SMT_OIL) - Let SQL Server generate it automatically
+            process = await Process.create({
+                Process_Name: processData.Process_Name.trim()
+            });
+        }
         
         // Format process
         const formattedProcess = formatProcessForResponse(process);

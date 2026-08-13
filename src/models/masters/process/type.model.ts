@@ -70,8 +70,8 @@ export const formatProcessForResponse = (process: any) => {
 // Model class definition (without initialization)
 export class Process_Master extends Model<ProcessMasterAttributes, ProcessMasterCreationAttributes>
     implements ProcessMasterAttributes {
-    public Id!: number;
-    public Process_Name!: string;
+    declare Id: number;
+    declare Process_Name: string;
 }
 
 // Function to initialize Process Master model with a specific Sequelize instance

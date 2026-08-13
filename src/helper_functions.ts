@@ -180,6 +180,7 @@ export const extractHHMM = (dateObj: string | Date): string => {
 };
 
 export const formatTime24 = (time24: string): string => {
+    if (!time24 || typeof time24 !== 'string') return '';
     const [hours, minutes] = time24.split(':').map(Number);
 
     let hours12 = hours % 12;
@@ -214,8 +215,8 @@ export const UTCTime = (isoString: string): string => {
 };
 
 export const timeToDate = (time?: string): Date => {
-    if (!time) {
-        console.error("No time input provided.");
+    if (!time || typeof time !== 'string') {
+        console.error("No valid time input provided.");
         return new Date(Date.UTC(1970, 0, 1, 12, 0, 0));
     }
 
@@ -224,7 +225,7 @@ export const timeToDate = (time?: string): Date => {
 };
 
 export const convertToTimeObject = (timeString?: string): string => {
-    const [hours = 0, minutes = 0, seconds = 0] = timeString 
+    const [hours = 0, minutes = 0, seconds = 0] = (timeString && typeof timeString === 'string') 
         ? timeString.split(':').map(Number) 
         : [0, 0, 0];
 
@@ -267,6 +268,9 @@ export const timeDuration = (startDate: string | Date, endDate: string | Date): 
 };
 
 export const customTimeDifference = (startTime: string, endTime: string): string => {
+    if (!startTime || typeof startTime !== 'string' || !endTime || typeof endTime !== 'string') {
+        return '00:00';
+    }
     const [startHours, startMinutes] = startTime.split(':').map(Number);
     const [endHours, endMinutes] = endTime.split(':').map(Number);
 
@@ -460,6 +464,7 @@ export const numberToWords = (prop: any): string => {
 };
 
 export const createAbbreviation = (sentence: string): string => {
+    if (!sentence || typeof sentence !== 'string') return '';
     return sentence
         .split(' ')
         .map(word => word[0])

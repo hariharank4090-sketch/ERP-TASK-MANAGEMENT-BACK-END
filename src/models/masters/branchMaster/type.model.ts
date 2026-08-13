@@ -220,7 +220,13 @@ export const branchQuerySchema = z.object({
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),
     search: z.string().optional(),
-    sortBy: z.string().default('BranchId'),
+    sortBy: z.enum([
+        'BranchId', 'Company_id', 'BranchCode', 'BranchName', 'Tele_Code',
+        'BranchTel1', 'Tele1_Code', 'BranchTel', 'BranchAddress', 'E_Mail',
+        'BranchCity', 'BranchCountry', 'BranchIncharge', 'BranchIncMobile',
+        'Pin_Code', 'State', 'Entry_By', 'Entry_Date', 'Modified_By',
+        'Modified_Date', 'Del_Flag', 'Deleted_By', 'Deleted_Date'
+    ]).default('BranchId'),
     sortOrder: z.enum(['ASC', 'DESC']).default('ASC')
 });
 
