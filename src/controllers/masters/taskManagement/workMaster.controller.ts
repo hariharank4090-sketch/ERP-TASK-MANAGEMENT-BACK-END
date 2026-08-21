@@ -468,11 +468,25 @@ export const createWork = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'Invalid Task_Id. Task does not exist.' });
         }
 
+        let scheduleExists = false;
         const scheduleResult = await sequelizeInstance.query(
             `SELECT Sch_Id FROM tbl_Project_Schedule WHERE Sch_Id = :schId`,
             { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }
         );
-        if (!(scheduleResult as any[]).length) {
+        if ((scheduleResult as any[]).length > 0) {
+            scheduleExists = true;
+        } else {
+            const USER_PORTAL_DB = process.env.USERPORTALDB || "User_Portal";
+            const ticketAllocResult = await sequelizeInstance.query(
+                `SELECT T_Sch_Id FROM [${USER_PORTAL_DB}].[dbo].[tbl_Ticket_Alloctation] WHERE T_Sch_Id = :schId`,
+                { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }
+            );
+            if ((ticketAllocResult as any[]).length > 0) {
+                scheduleExists = true;
+            }
+        }
+
+        if (!scheduleExists) {
             await transaction.rollback().catch(() => {});
             return res.status(400).json({ success: false, message: 'Invalid Sch_Id. Schedule does not exist.' });
         }
@@ -597,11 +611,25 @@ export const updateWork = async (req: Request, res: Response) => {
         const replacements: any = { id };
 
         if (data.Sch_Id !== undefined) {
+            let scheduleExists = false;
             const sr = await sequelizeInstance.query(
                 `SELECT Sch_Id FROM tbl_Project_Schedule WHERE Sch_Id = :schId`,
                 { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }
             ) as any[];
-            if (!sr.length) {
+            if (sr.length > 0) {
+                scheduleExists = true;
+            } else {
+                const USER_PORTAL_DB = process.env.USERPORTALDB || "User_Portal";
+                const ticketAllocResult = await sequelizeInstance.query(
+                    `SELECT T_Sch_Id FROM [${USER_PORTAL_DB}].[dbo].[tbl_Ticket_Alloctation] WHERE T_Sch_Id = :schId`,
+                    { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }
+                );
+                if ((ticketAllocResult as any[]).length > 0) {
+                    scheduleExists = true;
+                }
+            }
+
+            if (!scheduleExists) {
                 await transaction.rollback().catch(() => {});
                 return res.status(400).json({ success: false, message: 'Invalid Sch_Id. Schedule does not exist.' });
             }

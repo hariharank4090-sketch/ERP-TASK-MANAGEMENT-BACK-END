@@ -28,7 +28,65 @@ const router = express.Router();
  *                 type: string
  *     responses:
  *       200:
- *         description: Login successful - returns tokens for all companies
+ *         description: Login successful - returns user details (including Global_User_ID) and tokens for all companies
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Login successful"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         Global_User_ID:
+ *                           type: integer
+ *                           example: 262
+ *                         Local_User_ID:
+ *                           type: integer
+ *                           example: 262
+ *                         Name:
+ *                           type: string
+ *                           example: "Hari"
+ *                         UserName:
+ *                           type: string
+ *                           example: "hari"
+ *                         UserTypeId:
+ *                           type: integer
+ *                           example: 2
+ *                     currentCompany:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           companyId:
+ *                             type: integer
+ *                           companyName:
+ *                             type: string
+ *                             example: "SM TRADERS"
+ *                           dbName:
+ *                             type: string
+ *                             example: "ERP_LIVE_DB_SMT"
+ *                           dbConnected:
+ *                             type: boolean
+ *                             example: true
+ *                           token:
+ *                             type: string
+ *                             example: "token123example"
+ *                           UserTypeId:
+ *                             type: integer
+ *                             example: 2
+ *                     serverTime:
+ *                       type: string
+ *                       format: date-time
+ *                       example: "2026-08-17T05:36:56Z"
  *       401:
  *         description: Invalid credentials
  */

@@ -19,6 +19,8 @@ import  WorkMaster  from './workMaster.routes';
 import  TaskEmployeeParameters from './TaskEmployeeParameters.router';
 import leavemaster from './leave.routes';
 import branchMasterRoutes from './branchMaster.route';
+import ticketRoutes from './ticket.route';
+import ticketTaskRoutes from './ticketTask.route';
 const router = express.Router();
 
 
@@ -43,6 +45,8 @@ router.use('/taskParameterDetails',TaskEmployeeParameters)
 router.use('/workMaster',WorkMaster)
 router.use('/leave',leavemaster)
 router.use('/branch', branchMasterRoutes)
+router.use('/tickets', ticketRoutes);
+router.use('/ticketTasks', ticketTaskRoutes);
 
 
 export default router;

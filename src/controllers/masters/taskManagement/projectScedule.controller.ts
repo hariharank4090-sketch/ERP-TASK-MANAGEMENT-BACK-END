@@ -1235,7 +1235,12 @@ export const updateSchedule = async (req: Request, res: Response) => {
                 // Regenerate task work dates
                 let taskDatesToInsert: Date[] = [];
 
-                if (planId === 5) {
+                if (!isExtension && specificDatesArray.length > 0) {
+                    // Correction - Use ONLY specificDates array from frontend
+                    taskDatesToInsert = specificDatesArray
+                        .filter((ds: string) => ds && /^\d{4}-\d{2}-\d{2}$/.test(ds))
+                        .map((ds: string) => parseDateString(ds));
+                } else if (planId === 5) {
                     // PLAN 5: SPECIFIC DATES - Use ONLY specificDates array
                     if (specificDatesArray.length > 0) {
                         taskDatesToInsert = specificDatesArray

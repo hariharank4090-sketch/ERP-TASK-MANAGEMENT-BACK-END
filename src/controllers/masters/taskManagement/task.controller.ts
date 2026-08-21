@@ -871,16 +871,14 @@ export const deleteTask = async (req: Request, res: Response) => {
             return handleForbiddenError(res, 'You do not have permission to delete this task');
         }
 
-        // Check if task has any schedules before deleting
-        const scheduleCount = await ProjectSchedule.count({
-            where: { Task_Id: id }
-        });
-
-        if (scheduleCount > 0) {
-            return res.status(409).json({
-                success: false,
-                message: 'Cannot delete task because it has associated schedules. Please delete the schedules first.'
-            });
+        const db = (req as any).companyDB;
+        if (db) {
+            // Delete dependencies to avoid foreign key / relation conflicts and ensure successful deletion
+            await db.query('DELETE FROM tbl_Task_Details WHERE Task_Id = ?', { replacements: [id] });
+            await db.query('DELETE FROM tbl_Task_Paramet_DT WHERE Task_Id = ?', { replacements: [id] });
+            await db.query('DELETE FROM tbl_Project_Schedule WHERE Task_Id = ?', { replacements: [id] });
+            await db.query('DELETE FROM tbl_Work_Paramet_DT WHERE Task_Id = ?', { replacements: [id] });
+            await db.query('DELETE FROM tbl_Work_Master WHERE Task_Id = ?', { replacements: [id] });
         }
 
         await task.destroy();
