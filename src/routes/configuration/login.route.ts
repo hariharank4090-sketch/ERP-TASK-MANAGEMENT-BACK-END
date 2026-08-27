@@ -1,6 +1,6 @@
 // src/routes/configuration/login.route.ts
 import express from 'express';
-import { login, logout, verifyToken, switchCompany } from '../../controllers/configuration/login/index';
+import { login, logout, verifyToken, switchCompany, changePassword } from '../../controllers/configuration/login/index';
 import { setCompanyDatabase } from '../../middleware/companyDb.middleware';
 import { authenticate } from '../../middleware/auth';
 
@@ -150,5 +150,42 @@ router.post('/logout', authenticate, setCompanyDatabase, logout);
  *         description: Invalid or expired token
  */
 router.get('/verify', authenticate, setCompanyDatabase, verifyToken);
+
+/**
+ * @swagger
+ * /api/configuration/login/change-password:
+ *   post:
+ *     summary: Change user password
+ *     tags: [Authentication]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *               - oldPassword
+ *               - newPassword
+ *             properties:
+ *               userId:
+ *                 type: string
+ *               oldPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ *       400:
+ *         description: Invalid parameters
+ *       401:
+ *         description: Incorrect old password
+ *       404:
+ *         description: User not found
+ */
+router.post('/change-password', authenticate, setCompanyDatabase, changePassword);
 
 export default router;

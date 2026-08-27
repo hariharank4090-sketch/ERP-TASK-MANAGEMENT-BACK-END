@@ -65,23 +65,12 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             as: 'Company',
         });
 
-        const rawCompanyId = req.body.companyId || req.body.Company_Id || req.body.company_id || req.body.CompanyId;
-        const parsedCompanyId = rawCompanyId && !isNaN(parseInt(rawCompanyId.toString(), 10))
-            ? parseInt(rawCompanyId.toString(), 10)
-            : undefined;
-
         // ── Step 1: Validate credentials against the first matching user row ──
-        const isNumericUsername = /^\d+$/.test(username.toString());
-        let whereStr = "(u.UserName = :username";
-        if (isNumericUsername) {
-            whereStr += " OR u.Global_User_ID = :username";
-        }
-        whereStr += ") AND u.UDel_Flag = 0";
-
+        let whereStr = "u.UserName = :username AND u.UDel_Flag = 0";
         const replacements: any = { username };
-        if (parsedCompanyId && parsedCompanyId > 0) {
+        if (companyId && companyId > 0) {
             whereStr += " AND u.Company_Id = :companyId";
-            replacements.companyId = parsedCompanyId;
+            replacements.companyId = companyId;
         }
 
         const [users] = await sequelize.query(`
@@ -94,40 +83,36 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             WHERE ${whereStr}
         `, { replacements }) as any[];
 
-        let user: any = null;
-        let passwordValid = false;
+        const user = users.length > 0 ? users[0] : null;
 
-        for (const u of users) {
-            const isValid = await verifyPasswordCombined(password, u.Password ?? '');
-            if (isValid) {
-                user = u;
-                passwordValid = true;
-                break;
-            }
-        }
-
-        if (!user || !passwordValid) {
-            const errMessage = parsedCompanyId
-                ? 'Please select correct company'
-                : 'Invalid username or password';
+        if (!user) {
             return res.status(401).json({
                 status: 'error',
-                message: errMessage,
+                message: 'Invalid username or password',
+                data: null,
+                others: {},
+            });
+        }
+
+        const passwordValid = await verifyPasswordCombined(password, user.Password ?? '');
+        if (!passwordValid) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid username or password',
                 data: null,
                 others: {},
             });
         }
 
         // ── Step 2: Fetch ALL companies this username has access to ───────────
-        // Query using user.UserName to ensure we fetch all companies associated with the resolved username
         const [allUserRows] = await sequelize.query(`
             SELECT 
-                u.Global_User_ID, u.Local_User_ID, u.Company_Id, u.Autheticate_Id, u.UserTypeId, u.Password,
+                u.Global_User_ID, u.Local_User_ID, u.Company_Id, u.Autheticate_Id, u.UserTypeId,
                 c.Local_Comp_Id, c.Company_Name, c.DB_Name
             FROM tbl_Users u
             LEFT JOIN tbl_Company c ON u.Company_Id = c.Local_Comp_Id
             WHERE u.UserName = :username AND u.UDel_Flag = 0
-        `, { replacements: { username: user.UserName } }) as any[];
+        `, { replacements: { username } }) as any[];
 
         // ── Step 3: Generate / reuse one token per company ────────────────────
         const companiesWithTokens: Array<{
@@ -151,14 +136,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
 
             if (!rowCompanyId || !rowDbName) return null;
 
-            // Verify if the password matches for this specific company row
-            const isRowPasswordValid = await verifyPasswordCombined(password, row.Password ?? '');
-
-            if (!isRowPasswordValid) {
-                return null;
-            }
-
-            const companyToken: string = getTokenForCompany(user.Global_User_ID, rowCompanyId) 
+            let companyToken: string = getTokenForCompany(user.Global_User_ID, rowCompanyId) 
                 || row.Autheticate_Id 
                 || generateToken();
 
