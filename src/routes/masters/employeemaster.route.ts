@@ -419,7 +419,7 @@ const router = express.Router();
  *       items:
  *         $ref: '#/components/schemas/EmployeeCreate'
  *
- *     PaginationMetadata:
+ *     EmployeePaginationMetadata:
  *       type: object
  *       properties:
  *         totalRecords:
@@ -441,7 +441,7 @@ const router = express.Router();
  *           type: boolean
  *           example: false
  *
- *     ErrorResponse:
+ *     EmployeeErrorResponse:
  *       type: object
  *       properties:
  *         success:
@@ -462,7 +462,7 @@ const router = express.Router();
  *                 type: string
  *                 example: "Employee Code is required"
  *
- *     SuccessResponse:
+ *     EmployeeSuccessResponse:
  *       type: object
  *       properties:
  *         success:
@@ -609,7 +609,7 @@ const router = express.Router();
  *         minimum: 1
  *       example: 1
  *
- *     SearchQuery:
+ *     EmployeeSearchQuery:
  *       name: search
  *       in: query
  *       required: false
@@ -618,7 +618,7 @@ const router = express.Router();
  *         type: string
  *       example: "John"
  *
- *     BranchFilter:
+ *     EmployeeBranchFilter:
  *       name: branch
  *       in: query
  *       required: false
@@ -627,7 +627,7 @@ const router = express.Router();
  *         type: integer
  *       example: 1
  *
- *     DepartmentFilter:
+ *     EmployeeDepartmentFilter:
  *       name: departmentId
  *       in: query
  *       required: false
@@ -636,7 +636,7 @@ const router = express.Router();
  *         type: integer
  *       example: 1
  *
- *     DesignationFilter:
+ *     EmployeeDesignationFilter:
  *       name: designation
  *       in: query
  *       required: false
@@ -645,7 +645,7 @@ const router = express.Router();
  *         type: integer
  *       example: 1
  *
- *     SortByParam:
+ *     EmployeeSortByParam:
  *       name: sortBy
  *       in: query
  *       required: false
@@ -668,7 +668,7 @@ const router = express.Router();
  *           - Update_Date
  *         default: Emp_Id
  *
- *     SortOrderParam:
+ *     EmployeeSortOrderParam:
  *       name: sortOrder
  *       in: query
  *       required: false
@@ -723,12 +723,12 @@ const router = express.Router();
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - $ref: '#/components/parameters/SearchQuery'
- *       - $ref: '#/components/parameters/BranchFilter'
- *       - $ref: '#/components/parameters/DepartmentFilter'
- *       - $ref: '#/components/parameters/DesignationFilter'
- *       - $ref: '#/components/parameters/SortByParam'
- *       - $ref: '#/components/parameters/SortOrderParam'
+ *       - $ref: '#/components/parameters/EmployeeSearchQuery'
+ *       - $ref: '#/components/parameters/EmployeeBranchFilter'
+ *       - $ref: '#/components/parameters/EmployeeDepartmentFilter'
+ *       - $ref: '#/components/parameters/EmployeeDesignationFilter'
+ *       - $ref: '#/components/parameters/EmployeeSortByParam'
+ *       - $ref: '#/components/parameters/EmployeeSortOrderParam'
  *     responses:
  *       200:
  *         description: Employees retrieved successfully
@@ -755,7 +755,7 @@ const router = express.Router();
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               $ref: '#/components/schemas/EmployeeErrorResponse'
  *       401:
  *         description: Unauthorized - No token provided
  *       403:
@@ -1000,9 +1000,9 @@ router.get('/search', authenticate, authorize([]), searchEmployees);
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - $ref: '#/components/parameters/BranchFilter'
- *       - $ref: '#/components/parameters/DepartmentFilter'
- *       - $ref: '#/components/parameters/DesignationFilter'
+ *       - $ref: '#/components/parameters/EmployeeBranchFilter'
+ *       - $ref: '#/components/parameters/EmployeeDepartmentFilter'
+ *       - $ref: '#/components/parameters/EmployeeDesignationFilter'
  *     responses:
  *       200:
  *         description: Employee count fetched successfully
@@ -1176,7 +1176,7 @@ router.get('/department/:departmentId', authenticate, authorize([]), getEmployee
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               $ref: '#/components/schemas/EmployeeErrorResponse'
  *       401:
  *         description: Unauthorized - No token provided
  *       403:
@@ -1258,13 +1258,13 @@ router.get('/code/:empCode', authenticate, authorize([]), getEmployeeByCode);
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/SuccessResponse'
+ *               $ref: '#/components/schemas/EmployeeSuccessResponse'
  *       400:
  *         description: Validation failed
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               $ref: '#/components/schemas/EmployeeErrorResponse'
  *       401:
  *         description: Unauthorized - No token provided
  *       403:
@@ -1345,13 +1345,13 @@ router.post('/bulk', authenticate, authorize([]), bulkCreateEmployees);
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/SuccessResponse'
+ *               $ref: '#/components/schemas/EmployeeSuccessResponse'
  *       400:
  *         description: Validation failed
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               $ref: '#/components/schemas/EmployeeErrorResponse'
  *       401:
  *         description: Unauthorized - No token provided
  *       403:
@@ -1391,13 +1391,13 @@ router.put('/:id', authenticate,  authorize([]), updateEmployee);
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/SuccessResponse'
+ *               $ref: '#/components/schemas/EmployeeSuccessResponse'
  *       400:
  *         description: Validation failed
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               $ref: '#/components/schemas/EmployeeErrorResponse'
  *       401:
  *         description: Unauthorized - No token provided
  *       403:
@@ -1441,7 +1441,7 @@ router.patch('/:id', authenticate,  authorize([]), partialUpdateEmployee);
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               $ref: '#/components/schemas/EmployeeErrorResponse'
  *       401:
  *         description: Unauthorized - No token provided
  *       403:

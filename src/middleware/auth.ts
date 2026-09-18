@@ -78,8 +78,8 @@ export const authenticate = async (
             const [users] = await defaultDb.query(
                 `SELECT Global_User_ID, Local_User_ID, UserName, UserTypeId, Name, Company_Id, UDel_Flag, Autheticate_Id 
                  FROM tbl_Users WITH (NOLOCK) 
-                 WHERE Global_User_ID = :userId AND UDel_Flag = 0`,
-                { replacements: { userId: session.userId } }
+                 WHERE Global_User_ID = :userId AND Company_Id = :companyId AND UDel_Flag = 0`,
+                { replacements: { userId: session.userId, companyId: session.companyId } }
             ) as any[];
             const user = users.length > 0 ? users[0] : null;
 

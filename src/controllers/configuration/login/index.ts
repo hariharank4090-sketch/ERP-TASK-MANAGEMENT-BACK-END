@@ -136,6 +136,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             dbName: string;
             token: string;
             Local_User_ID: number | null;
+            Global_User_ID: number | null;
             dbConnected: boolean;
             UserTypeId: number | null;
         }> = [];
@@ -158,7 +159,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                 return null;
             }
 
-            const companyToken: string = getTokenForCompany(user.Global_User_ID, rowCompanyId) 
+            const companyToken: string = getTokenForCompany(row.Global_User_ID, rowCompanyId) 
                 || row.Autheticate_Id 
                 || generateToken();
 
@@ -166,7 +167,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
 
             storeTokenSession(
                 companyToken,
-                user.Global_User_ID,
+                row.Global_User_ID,
                 rowLocalUserId,
                 rowCompanyId,
                 rowDbName,
@@ -186,6 +187,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                 dbName:       rowDbName,
                 token:        companyToken,
                 Local_User_ID: rowLocalUserId,
+                Global_User_ID: row.Global_User_ID,
                 dbConnected,
                 UserTypeId:   rowUserTypeId,
             };
@@ -197,9 +199,17 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         });
 
         // ── Step 4: Determine the "current" company for this login ────────────
-        let currentEntry = companiesWithTokens.find(c => c.companyId === (companyId ?? user.Company_Id));
+        let currentEntry = companiesWithTokens.find(c => c.companyId === (parsedCompanyId ?? user.Company_Id));
         if (!currentEntry && companiesWithTokens.length > 0) {
             currentEntry = companiesWithTokens[0];
+        }
+
+        if (currentEntry) {
+            const currentIndex = companiesWithTokens.indexOf(currentEntry);
+            if (currentIndex > 0) {
+                companiesWithTokens.splice(currentIndex, 1);
+                companiesWithTokens.unshift(currentEntry);
+            }
         }
 
         if (!currentEntry) {
@@ -249,6 +259,8 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                     dbConnected: c.dbConnected,
                     token:       c.token,
                     UserTypeId:  c.UserTypeId,
+                    Local_User_ID: c.Local_User_ID,
+                    Global_User_ID: c.Global_User_ID,
                 })),
                 serverTime: new Date().toISOString(),
             },
@@ -320,10 +332,24 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
         const sequelize = getDefaultConnection();
         const UserModel = initUserModel(sequelize);
 
+        const currentUser = await UserModel.findOne({
+            attributes: ['UserName'],
+            where: { Global_User_ID: currentSession.userId }
+        });
+
+        if (!currentUser) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found',
+                data: null,
+                others: {},
+            });
+        }
+
         const userAccess = await UserModel.findOne({
-            attributes: ['Global_User_ID', 'Local_User_ID'],
+            attributes: ['Global_User_ID', 'Local_User_ID', 'UserTypeId'],
             where: {
-                Global_User_ID: currentSession.userId,
+                UserName: currentUser.UserName,
                 Company_Id: companyConfig.id,
                 UDel_Flag: 0,
             },
@@ -339,13 +365,13 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
         }
 
         // Reuse the token already stored for this user+company if available
-        let companyToken = getTokenForCompany(currentSession.userId, companyConfig.id);
+        let companyToken = getTokenForCompany(userAccess.Global_User_ID, companyConfig.id);
 
         if (!companyToken) {
             companyToken = generateToken();
             storeTokenSession(
                 companyToken,
-                currentSession.userId,
+                userAccess.Global_User_ID,
                 userAccess.Local_User_ID,
                 companyConfig.id,
                 companyConfig.database,
@@ -374,6 +400,8 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
                 token: companyToken,
                 user: {
                     Local_User_ID: userAccess.Local_User_ID,
+                    UserTypeId: userAccess.UserTypeId,
+                    Global_User_ID: userAccess.Global_User_ID,
                 },
                 company: {
                     companyId: companyConfig.id,
@@ -491,7 +519,7 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
         });
 
         const userCompanies = await UserModel.unscoped().findAll({
-            attributes: ['Global_User_ID', 'Local_User_ID', 'Company_Id', 'Autheticate_Id'],
+            attributes: ['Global_User_ID', 'Local_User_ID', 'Company_Id', 'Autheticate_Id', 'UserTypeId'],
             include: [{
                 model: CompanyModel,
                 attributes: ['Local_Comp_Id', 'Company_Name', 'DB_Name'],
@@ -511,6 +539,9 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
                     dbName:      envConfig?.database || uData.Company?.DB_Name || '',
                     token:       u.Autheticate_Id ?? '',    // each company's own token
                     dbConnected: true,
+                    UserTypeId:  u.UserTypeId,
+                    Local_User_ID: u.Local_User_ID,
+                    Global_User_ID: u.Global_User_ID,
                 };
             })
             .filter(c => c.companyId);
