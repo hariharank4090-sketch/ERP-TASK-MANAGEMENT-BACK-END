@@ -51,7 +51,7 @@ const validateWithZod = <T>(schema: any, data: any): {
 // Helper function to convert raw query results to model format
 function mapRawToTaskDetail(raw: any): TaskDetailWithSchedule {
     if (!raw) return {} as TaskDetailWithSchedule;
-    
+
     return {
         Id: raw.Id,
         AN_No: raw.AN_No,
@@ -95,9 +95,9 @@ const getTaskDetailModel = (sequelizeInstance: Sequelize) => {
 export const getAllTaskDetails = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
-        
+
         const validation = validateWithZod<TaskDetailQueryParams>(taskDetailQuerySchema, req.query);
-        
+
         if (!validation.success) {
             return res.status(400).json({
                 success: false,
@@ -147,13 +147,20 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
             whereClause += ' AND td.Invovled_Stat = :Invovled_Stat';
             replacements.Invovled_Stat = Invovled_Stat;
         }
-        if (from_Task_Assign_dt) {
+        if (from_Task_Assign_dt && to_Task_Assign_dt) {
             const startDate = new Date(from_Task_Assign_dt);
             startDate.setHours(0, 0, 0, 0);
-            whereClause += ' AND td.Task_Assign_dt >= :from_Task_Assign_dt';
+            const endDate = new Date(to_Task_Assign_dt);
+            endDate.setHours(23, 59, 59, 999);
+            whereClause += ' AND td.Task_Assign_dt <= :to_Task_Assign_dt AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, 1) != 3)';
             replacements.from_Task_Assign_dt = startDate;
-        }
-        if (to_Task_Assign_dt) {
+            replacements.to_Task_Assign_dt = endDate;
+        } else if (from_Task_Assign_dt) {
+            const startDate = new Date(from_Task_Assign_dt);
+            startDate.setHours(0, 0, 0, 0);
+            whereClause += ' AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, 1) != 3)';
+            replacements.from_Task_Assign_dt = startDate;
+        } else if (to_Task_Assign_dt) {
             const endDate = new Date(to_Task_Assign_dt);
             endDate.setHours(23, 59, 59, 999);
             whereClause += ' AND td.Task_Assign_dt <= :to_Task_Assign_dt';
@@ -182,7 +189,7 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
                 t.Task_Type_Id
              FROM tbl_Task_Details td
              LEFT JOIN LatestSchedules ls ON ls.Task_Id = td.Task_Id
-             LEFT JOIN tbl_Project_Schedule ps ON ps.Sch_Id = ls.Max_Sch_Id
+             LEFT JOIN tbl_Project_Schedule ps ON ps.Sch_Id = COALESCE(td.Sch_Id, ls.Max_Sch_Id)
              LEFT JOIN tbl_Task t ON td.Task_Id = t.Task_Id
              WHERE ${whereClause}
              ORDER BY ${sortBy} ${sortOrder}`,
@@ -192,7 +199,59 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
             }
         );
 
-        const mappedRows = (rows || []).map(mapRawToTaskDetail);
+        const reqDateParam = to_Task_Assign_dt || from_Task_Assign_dt;
+        const targetDateObj = reqDateParam ? new Date(reqDateParam) : null;
+        if (targetDateObj) {
+            targetDateObj.setHours(0, 0, 0, 0);
+        }
+
+        const startDateObj = from_Task_Assign_dt ? new Date(from_Task_Assign_dt) : null;
+        if (startDateObj) startDateObj.setHours(0, 0, 0, 0);
+
+        const endDateObj = to_Task_Assign_dt ? new Date(to_Task_Assign_dt) : null;
+        if (endDateObj) endDateObj.setHours(23, 59, 59, 999);
+
+        const finalRows: any[] = [];
+        const pastRowGroups: { [key: string]: any[] } = {};
+
+        for (const row of (rows || [])) {
+            const taskDateObj = row.Task_Assign_dt ? new Date(row.Task_Assign_dt) : null;
+
+            const isInsideRange = taskDateObj &&
+                (!startDateObj || taskDateObj >= startDateObj) &&
+                (!endDateObj || taskDateObj <= endDateObj);
+
+            if (isInsideRange) {
+                finalRows.push(row);
+            } else if (targetDateObj && taskDateObj && taskDateObj < targetDateObj && row.Schedule_Sch_Status !== 3) {
+                const key = `${row.Sch_Id}_${row.Emp_Id || 0}_${row.Task_Id || 0}`;
+                if (!pastRowGroups[key]) {
+                    pastRowGroups[key] = [];
+                }
+                pastRowGroups[key].push(row);
+            }
+        }
+
+        for (const key of Object.keys(pastRowGroups)) {
+            const group = pastRowGroups[key];
+            group.sort((a, b) => new Date(b.Task_Assign_dt).getTime() - new Date(a.Task_Assign_dt).getTime());
+            const latestPastRow = group[0];
+            latestPastRow.Task_Assign_dt = targetDateObj!.toISOString();
+            finalRows.push(latestPastRow);
+        }
+
+        // Deduplicate per schedule, employee, and assigned date (Sch_Id + Emp_Id + Task_Assign_dt)
+        // so every assigned date card is correctly preserved and listed for its assigned date
+        const uniqueScheduleMap = new Map<string, any>();
+        for (const row of finalRows) {
+            const dateStr = row.Task_Assign_dt ? new Date(row.Task_Assign_dt).toISOString().split('T')[0] : '';
+            const schKey = row.Sch_Id ? `${row.Sch_Id}_${row.Emp_Id || 0}_${dateStr}` : `td_${row.Id}`;
+            if (!uniqueScheduleMap.has(schKey)) {
+                uniqueScheduleMap.set(schKey, row);
+            }
+        }
+
+        const mappedRows = Array.from(uniqueScheduleMap.values()).map(mapRawToTaskDetail);
 
         return res.status(200).json({
             success: true,
@@ -212,7 +271,7 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
 export const getTaskDetailById = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
-        
+
         const id = parseIdParam(req.params.id);
         if (!id) {
             return res.status(400).json({
@@ -222,7 +281,7 @@ export const getTaskDetailById = async (req: Request, res: Response) => {
         }
 
         const validation = validateWithZod<{ id: number }>(taskDetailIdSchema, { id });
-        
+
         if (!validation.success) {
             return res.status(400).json({
                 success: false,
@@ -257,7 +316,7 @@ export const getTaskDetailById = async (req: Request, res: Response) => {
         );
 
         const taskDetail = rows && rows.length > 0 ? rows[0] : null;
-        
+
         if (!taskDetail) {
             return notFound(res, 'Task detail not found');
         }
@@ -282,9 +341,9 @@ export const getTaskDetailById = async (req: Request, res: Response) => {
 export const getTaskDetailsByProject = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
-        
+
         const projectIdParam = getStringParam(req.params.projectId);
-        
+
         if (!projectIdParam || isNaN(parseInt(projectIdParam))) {
             return res.status(400).json({
                 success: false,
@@ -340,9 +399,9 @@ export const getTaskDetailsByProject = async (req: Request, res: Response) => {
 export const getTaskDetailsBySchedule = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
-        
+
         const schIdParam = getStringParam(req.params.schId);
-        
+
         if (!schIdParam || isNaN(parseInt(schIdParam))) {
             return res.status(400).json({
                 success: false,
@@ -398,9 +457,9 @@ export const getTaskDetailsBySchedule = async (req: Request, res: Response) => {
 export const getTaskDetailsByTask = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
-        
+
         const taskIdParam = getStringParam(req.params.taskId);
-        
+
         if (!taskIdParam || isNaN(parseInt(taskIdParam))) {
             return res.status(400).json({
                 success: false,
@@ -456,9 +515,9 @@ export const getTaskDetailsByTask = async (req: Request, res: Response) => {
 export const getTaskDetailsByEmployee = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
-        
+
         const empIdParam = getStringParam(req.params.empId);
-        
+
         if (!empIdParam || isNaN(parseInt(empIdParam))) {
             return res.status(400).json({
                 success: false,
@@ -514,9 +573,9 @@ export const getTaskDetailsByEmployee = async (req: Request, res: Response) => {
 export const getTaskDetailsWithFilters = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
-        
+
         const validation = validateWithZod<TaskDetailQueryParams>(taskDetailQuerySchema, req.query);
-        
+
         if (!validation.success) {
             return res.status(400).json({
                 success: false,
@@ -616,7 +675,7 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
         const TaskDetailModel = getTaskDetailModel(companyDB);
-        
+
         const id = parseIdParam(req.params.id);
         if (!id) {
             return res.status(400).json({
@@ -626,7 +685,7 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
         }
 
         const idValidation = validateWithZod<{ id: number }>(taskDetailIdSchema, { id });
-        
+
         if (!idValidation.success) {
             return res.status(400).json({
                 success: false,
@@ -636,7 +695,7 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
         }
 
         const bodyValidation = validateWithZod<TaskDetailUpdateInput>(taskDetailUpdateSchema, req.body);
-        
+
         if (!bodyValidation.success) {
             return res.status(400).json({
                 success: false,
@@ -649,7 +708,7 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
         delete updateData.taskDates;
 
         const taskDetail = await TaskDetailModel.findByPk(id);
-        
+
         if (!taskDetail) {
             return notFound(res, 'Task detail not found');
         }
@@ -688,7 +747,7 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
         }
 
         await taskDetail.update(updateData);
-        
+
         const rows: any[] = await companyDB.query(
             `SELECT 
                 td.*,
@@ -715,13 +774,13 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
         );
 
         const updatedTaskDetail = rows && rows.length > 0 ? rows[0] : null;
-        
+
         if (!updatedTaskDetail) {
             return notFound(res, 'Task detail not found after update');
         }
 
         const mappedTaskDetail = mapRawToTaskDetail(updatedTaskDetail);
-        
+
         return updated(res, {
             success: true,
             message: 'Task detail updated successfully',
@@ -741,7 +800,7 @@ export const deleteTaskDetail = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
         const TaskDetailModel = getTaskDetailModel(companyDB);
-        
+
         const id = parseIdParam(req.params.id);
         if (!id) {
             return res.status(400).json({
@@ -751,7 +810,7 @@ export const deleteTaskDetail = async (req: Request, res: Response) => {
         }
 
         const validation = validateWithZod<{ id: number }>(taskDetailIdSchema, { id });
-        
+
         if (!validation.success) {
             return res.status(400).json({
                 success: false,
@@ -761,13 +820,13 @@ export const deleteTaskDetail = async (req: Request, res: Response) => {
         }
 
         const taskDetail = await TaskDetailModel.findByPk(id);
-        
+
         if (!taskDetail) {
             return notFound(res, 'Task detail not found');
         }
 
         await taskDetail.destroy();
-        
+
         return res.status(200).json({
             success: true,
             message: 'Task detail deleted successfully'
@@ -786,11 +845,11 @@ export const getTaskDetailsStatistics = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
         const TaskDetailModel = getTaskDetailModel(companyDB);
-        
+
         const totalRecords = await TaskDetailModel.count();
         const recordsWithAN = await TaskDetailModel.count({ where: { AN_No: { [Op.ne]: null } } });
         const recordsWithAssignedEmp = await TaskDetailModel.count({ where: { Assigned_Emp_Id: { [Op.ne]: null } } });
-        
+
         const statusCounts = await TaskDetailModel.findAll({
             attributes: ['Invovled_Stat', [companyDB.fn('COUNT', companyDB.col('Invovled_Stat')), 'count']],
             where: { Invovled_Stat: { [Op.ne]: null } },
@@ -806,8 +865,8 @@ export const getTaskDetailsStatistics = async (req: Request, res: Response) => {
             { type: 'SELECT' }
         );
 
-        const timerBasedStats = (timerBasedStatsResult && timerBasedStatsResult.length > 0) 
-            ? timerBasedStatsResult[0] 
+        const timerBasedStats = (timerBasedStatsResult && timerBasedStatsResult.length > 0)
+            ? timerBasedStatsResult[0]
             : { tasksWithTimerBased: 0, timerBasedCount: 0 };
 
         return res.status(200).json({
@@ -906,21 +965,21 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
 
         // If after filtering (or if it was initially empty) we have nothing, but taskDates were provided, generate them
         if ((!scheduleTaskData || scheduleTaskData.length === 0) && taskDates && taskDates.length > 0) {
-             scheduleTaskData = taskDates.map(dateStr => ({
-                 Task_Work_Date: dateStr,
-                 Task_Start_Time: masterEstStart,
-                 Task_End_Time: masterEstEnd
-             }));
+            scheduleTaskData = taskDates.map(dateStr => ({
+                Task_Work_Date: dateStr,
+                Task_Start_Time: masterEstStart,
+                Task_End_Time: masterEstEnd
+            }));
         }
 
         // Fallback to schedule start date if no dates found and no dates provided
         if (!scheduleTaskData || scheduleTaskData.length === 0) {
             if (schMasterData && schMasterData.length > 0 && schMasterData[0].Sch_Start_Date) {
-                 scheduleTaskData = [{
-                     Task_Work_Date: schMasterData[0].Sch_Start_Date,
-                     Task_Start_Time: masterEstStart,
-                     Task_End_Time: masterEstEnd
-                 }];
+                scheduleTaskData = [{
+                    Task_Work_Date: schMasterData[0].Sch_Start_Date,
+                    Task_Start_Time: masterEstStart,
+                    Task_End_Time: masterEstEnd
+                }];
             }
         }
 
@@ -1044,10 +1103,10 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
             for (let j = 0; j < empScheduleTaskData.length; j++) {
                 const taskRecord = empScheduleTaskData[j] as ScheduleTaskData;
                 const twd: any = taskRecord.Task_Work_Date;
-                const recordDateStr = typeof twd === 'string' 
-                    ? twd.substring(0, 10) 
+                const recordDateStr = typeof twd === 'string'
+                    ? twd.substring(0, 10)
                     : new Date(twd).toISOString().substring(0, 10);
-                
+
                 // Check if duplicate exists for Sch_Id, Emp_Id, Task_Id and Task_Assign_dt (date only)
                 const checkDuplicate: any[] = await companyDB.query(
                     `SELECT Id FROM tbl_Task_Details 
@@ -1226,11 +1285,11 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
         // Fallback to schedule start date if no dates found and no dates provided
         if (!scheduleTaskData || scheduleTaskData.length === 0) {
             if (schMasterData && schMasterData.length > 0 && schMasterData[0].Sch_Start_Date) {
-                 scheduleTaskData = [{
-                     Task_Work_Date: schMasterData[0].Sch_Start_Date,
-                     Task_Start_Time: masterEstStart,
-                     Task_End_Time: masterEstEnd
-                 }];
+                scheduleTaskData = [{
+                    Task_Work_Date: schMasterData[0].Sch_Start_Date,
+                    Task_Start_Time: masterEstStart,
+                    Task_End_Time: masterEstEnd
+                }];
             }
         }
 
@@ -1279,7 +1338,7 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
         const insertedAN_NoValues: number[] = [];
         const updatedRecords: any[] = [];
         const duplicateRecords: any[] = [];
-        const scheduleDates = scheduleTaskData.map((record: ScheduleTaskData) => 
+        const scheduleDates = scheduleTaskData.map((record: ScheduleTaskData) =>
             new Date(record.Task_Work_Date).toISOString().split('T')[0]
         );
 
@@ -1306,7 +1365,7 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
         for (let j = 0; j < scheduleTaskData.length; j++) {
             const taskRecord = scheduleTaskData[j] as ScheduleTaskData;
             const recordDate = new Date(taskRecord.Task_Work_Date).toISOString().split('T')[0];
-            
+
             // Check if record already exists
             if (existingDatesMap.has(recordDate)) {
                 // Update existing record

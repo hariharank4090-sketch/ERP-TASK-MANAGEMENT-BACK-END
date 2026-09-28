@@ -52,7 +52,7 @@ export const projectCreateSchema = z.object({
       if (typeof val === 'string') {
         const date = new Date(val);
         if (isNaN(date.getTime())) {
-          throw new Error('Invalid date format');
+          return new Date(NaN);
         }
         return date;
       }
@@ -66,7 +66,7 @@ export const projectCreateSchema = z.object({
       if (typeof val === 'string') {
         const date = new Date(val);
         if (isNaN(date.getTime())) {
-          throw new Error('Invalid date format');
+          return new Date(NaN);
         }
         return date;
       }
@@ -128,7 +128,7 @@ export const projectUpdateSchema = z.object({
       if (typeof val === 'string') {
         const date = new Date(val);
         if (isNaN(date.getTime())) {
-          throw new Error('Invalid date format');
+          return new Date(NaN);
         }
         return date;
       }
@@ -143,7 +143,7 @@ export const projectUpdateSchema = z.object({
       if (typeof val === 'string') {
         const date = new Date(val);
         if (isNaN(date.getTime())) {
-          throw new Error('Invalid date format');
+          return new Date(NaN);
         }
         return date;
       }

@@ -48,9 +48,23 @@ const uploadFile = (
         },
     });
 
+    const allowedFileTypes = /jpeg|jpg|png|gif|webp|pdf|doc|docx|xls|xlsx|csv|txt|mp3|mp4|wav|ogg|webm/;
+
+    const fileFilter = (req: any, file: Express.Multer.File, cb: any) => {
+        const extname = allowedFileTypes.test(path.extname(file.originalname).toLowerCase());
+        const mimetype = allowedFileTypes.test(file.mimetype);
+
+        if (extname && mimetype) {
+            cb(null, true);
+        } else {
+            cb(new Error('Invalid file type. Allowed formats: images, documents, audio, and video files.'));
+        }
+    };
+
     const upload = multer({ 
         storage,
-        limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+        limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+        fileFilter
     }).single(key);
 
     return new Promise<void>((resolve, reject) => {

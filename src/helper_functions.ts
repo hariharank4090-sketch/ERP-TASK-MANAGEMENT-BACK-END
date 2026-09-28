@@ -95,8 +95,10 @@ export const getIndianTime = (dateString?: string | Date): string => {
 };
 
 export const addFiveThirty = (dateStr: string): string => {
+    if (!dateStr || typeof dateStr !== 'string') return '';
     const iso = dateStr.replace(" ", "T");
     const baseDate = new Date(iso);
+    if (isNaN(baseDate.getTime())) return '';
     const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
     const istDate = new Date(baseDate.getTime() + IST_OFFSET_MS);
 
@@ -431,36 +433,71 @@ export const validValue = (val: any): any => {
     return Boolean(val) ? val : '';
 };
 
-export const numberToWords = (prop: any): string => {
-    const number = Number(prop);
+const convertIntegerToWords = (n: number): string => {
     const singleDigits: string[] = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
     const teens: string[] = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
     const tens: string[] = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-    const thousands: string[] = ['', ' Thousand', ' Lakhs'];
 
-    if (number < 10) {
-        return singleDigits[number];
-    } else if (number < 20) {
-        return teens[number - 10];
-    } else if (number < 100) {
-        const tenDigit = Math.floor(number / 10);
-        const singleDigit = number % 10;
+    if (n < 10) {
+        return singleDigits[n];
+    } else if (n < 20) {
+        return teens[n - 10];
+    } else if (n < 100) {
+        const tenDigit = Math.floor(n / 10);
+        const singleDigit = n % 10;
         return tens[tenDigit] + (singleDigit !== 0 ? ' ' + singleDigits[singleDigit] : '');
-    } else if (number < 1000) {
-        const hundredDigit = Math.floor(number / 100);
-        const remainingDigits = number % 100;
-        return singleDigits[hundredDigit] + ' Hundred' + (remainingDigits !== 0 ? ' and ' + numberToWords(remainingDigits) : '');
-    } else if (number < 100000) {
-        const thousandDigit = Math.floor(number / 1000);
-        const remainingDigits = number % 1000;
-        return numberToWords(thousandDigit) + thousands[1] + (remainingDigits !== 0 ? ', ' + numberToWords(remainingDigits) : '');
-    } else if (number < 10000000) {
-        const lakhDigit = Math.floor(number / 100000);
-        const remainingDigits = number % 100000;
-        return numberToWords(lakhDigit) + thousands[2] + (remainingDigits !== 0 ? ', ' + numberToWords(remainingDigits) : '');
+    } else if (n < 1000) {
+        const hundredDigit = Math.floor(n / 100);
+        const remainingDigits = n % 100;
+        return singleDigits[hundredDigit] + ' Hundred' + (remainingDigits !== 0 ? ' and ' + convertIntegerToWords(remainingDigits) : '');
+    } else if (n < 100000) {
+        const thousandDigit = Math.floor(n / 1000);
+        const remainingDigits = n % 1000;
+        return convertIntegerToWords(thousandDigit) + ' Thousand' + (remainingDigits !== 0 ? ', ' + convertIntegerToWords(remainingDigits) : '');
+    } else if (n < 10000000) {
+        const lakhDigit = Math.floor(n / 100000);
+        const remainingDigits = n % 100000;
+        return convertIntegerToWords(lakhDigit) + ' Lakh' + (remainingDigits !== 0 ? ', ' + convertIntegerToWords(remainingDigits) : '');
     } else {
-        return 'Number is too large';
+        const croreDigit = Math.floor(n / 10000000);
+        const remainingDigits = n % 10000000;
+        return convertIntegerToWords(croreDigit) + ' Crore' + (remainingDigits !== 0 ? ', ' + convertIntegerToWords(remainingDigits) : '');
     }
+};
+
+export const numberToWords = (prop: any): string => {
+    if (prop === null || prop === undefined || prop === '') return 'Zero';
+    const num = Number(prop);
+    if (isNaN(num)) return 'Zero';
+    if (num === 0) return 'Zero';
+
+    const isNegative = num < 0;
+    const absNum = Math.abs(num);
+
+    const numStr = String(prop).trim();
+    const parts = numStr.split('.');
+    
+    const intNum = Math.floor(absNum);
+    const decNum = parts.length > 1 && parts[1] ? parseInt(parts[1].slice(0, 2).padEnd(2, '0'), 10) : 0;
+
+    let result = '';
+
+    if (intNum > 0) {
+        result = convertIntegerToWords(intNum);
+    } else if (decNum > 0) {
+        result = 'Zero';
+    }
+
+    if (decNum > 0 && !isNaN(decNum)) {
+        const decWords = convertIntegerToWords(decNum);
+        if (intNum > 0) {
+            result += ` and ${decWords} Paise`;
+        } else {
+            result = `${decWords} Paise`;
+        }
+    }
+
+    return isNegative ? `Minus ${result}` : result;
 };
 
 export const createAbbreviation = (sentence: string): string => {
@@ -468,7 +505,7 @@ export const createAbbreviation = (sentence: string): string => {
     return sentence
         .split(' ')
         .map(word => word[0])
-        .filter(char => /[a-zA-Z]/.test(char))
+        .filter(char => char && /[a-zA-Z]/.test(char))
         .join('')
         .toUpperCase();
 };
