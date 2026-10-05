@@ -1,5 +1,6 @@
 import express from 'express';
 
+import userTypeRoutes from './userType.routes';
 import taskTypeRoutes from './taskType.routes';
 import projectRoutes from './project.routes';       
 
@@ -7,7 +8,7 @@ import processMasterRoutes from './processMaster.routes';
 import taskParamTypeRoutes from './taskParamType.route';
 import paramMasterRoutes from './paramMaster.routes';
 import dropdownRoutes from './dropdown.route';
-// import userRoutes from './user.routes';
+import userRoutes from './user.routes';
 import taskRoutes from './task.routes';
 import LeavetypeRoutes from './leaveType.route';
 // import ProjectEmployee from './employeeinvolved.route';
@@ -24,6 +25,8 @@ import ticketTaskRoutes from './ticketTask.route';
 const router = express.Router();
 
 
+router.use('/userType', userTypeRoutes);
+router.use('/user-type', userTypeRoutes);
 router.use('/taskType', taskTypeRoutes)
 router.use('/project',projectRoutes)
 
@@ -32,7 +35,7 @@ router.use('/processMaster',processMasterRoutes)
 router.use('/parametDataTypes',taskParamTypeRoutes)
 router.use('/paramMaster',paramMasterRoutes)
 router.use('/dropdowns',dropdownRoutes)
-// router.use('/users',userRoutes)
+router.use('/users',userRoutes)
 
 router.use('/tasks',taskRoutes)
 // router.use('/company',taskRoutes)

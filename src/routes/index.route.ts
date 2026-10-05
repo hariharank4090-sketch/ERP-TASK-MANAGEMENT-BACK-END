@@ -3,14 +3,17 @@ import configurationRoutes from './configuration/index.config.route';
 import mastersRoutes from './masters/index.master.route';
 import attendanceRoutes from './attendance/index.attendance.route';
 import reportsRoutes from './reports/index.reports.route';
+import appMenuRoutes from './configuration/appMenu.route';
 
 import { requireAuth } from '../controllers/configuration/login/requireAuth';
 
 const router = express.Router();
 
 router.use('/configuration', configurationRoutes);
+router.use('/authorization/userRights', requireAuth, appMenuRoutes);
+router.use('/authorization', requireAuth, appMenuRoutes);
 router.use('/masters', requireAuth, mastersRoutes);
-router.use('/attendance',requireAuth, attendanceRoutes);
+router.use('/attendance', requireAuth, attendanceRoutes);
 router.use('/reports', requireAuth, reportsRoutes);
 
 export default router;

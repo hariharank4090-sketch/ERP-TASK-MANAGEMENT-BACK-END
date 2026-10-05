@@ -26,8 +26,8 @@ const PORT = process.env.PORT || 5001;
 
 app.use(cors({ origin: '*', credentials: true }));
 app.use(compression({ threshold: 512 })); // compress responses > 512 bytes
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan(':method :url :status :response-time ms'));
 
 // Request logger (omits passwords)
@@ -109,21 +109,21 @@ const hasFrontend = fs.existsSync(indexPath);
 
 if (hasFrontend) {
     console.log('✅ Frontend build found at:', reactBuildPath);
-    
+
     // Serve static files from frontend directory
     app.use(express.static(reactBuildPath));
-    
+
     // ─── CRITICAL FIX: Catch-all route for client-side routing ───
     // This must be AFTER all API routes and static file middleware
     app.get('*', (req, res) => {
         // Skip API routes that might have been missed
         if (req.path.startsWith('/api/') || req.path.startsWith('/api-docs') || req.path === '/health') {
-            return res.status(404).json({ 
-                status: 'error', 
-                message: `API endpoint ${req.path} not found` 
+            return res.status(404).json({
+                status: 'error',
+                message: `API endpoint ${req.path} not found`
             });
         }
-        
+
         // For all other routes, serve index.html (for React Router)
         res.sendFile(indexPath, (err) => {
             if (err) {
@@ -135,7 +135,7 @@ if (hasFrontend) {
 } else {
     console.warn('⚠️  Frontend build not found at:', reactBuildPath);
     console.warn('   API routes are available but frontend will return 404');
-    
+
     // Optional: Return a message for missing frontend
     app.get('*', (req, res) => {
         if (!req.path.startsWith('/api/') && req.path !== '/api-docs' && req.path !== '/health') {

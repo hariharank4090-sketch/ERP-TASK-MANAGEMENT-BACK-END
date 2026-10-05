@@ -98,7 +98,7 @@ const companyRawConfigs: Map<number, CompanyRawConfig> = new Map();
 // Load raw company configurations from environment
 const loadRawCompanyConfigurations = (): void => {
     console.log('📂 Loading raw company configurations from .env...');
-    
+
     for (let i = 1; i <= 10; i++) {
         const companyId = parseInt(process.env[`COMPANY${i}_ID`] ?? '0', 10);
         const dbName = process.env[`COMPANY${i}_DATABASE`];
@@ -122,7 +122,7 @@ const loadRawCompanyConfigurations = (): void => {
         console.log(`✅ Loaded raw config for Company ${companyId}: ${config.name}`);
         console.log(`   Raw Host: ${config.rawHost}`);
     }
-    
+
     console.log(`📊 Total raw companies loaded: ${companyRawConfigs.size}`);
 };
 
@@ -233,7 +233,7 @@ const getCompanyDB = async (token: string | null): Promise<Sequelize> => {
 const parseRawHostString = (raw: string): { server: string; port?: number; instance?: string } => {
     let s = raw.trim().replace(/^["']|["']$/g, '');
     s = s.replace(/\\\\/g, '\\');
-    
+
     // Handle format "122.165.240.65\SQL_2019,1435" - instance with explicit port
     const instanceWithPortMatch = s.match(/^([^\\,]+)\\([^,]+),(\d+)$/);
     if (instanceWithPortMatch) {
@@ -243,7 +243,7 @@ const parseRawHostString = (raw: string): { server: string; port?: number; insta
             port: parseInt(instanceWithPortMatch[3], 10)
         };
     }
-    
+
     // Handle format "server\instance" only
     const instanceOnlyMatch = s.match(/^([^\\,]+)\\([^\\,]+)$/);
     if (instanceOnlyMatch) {
@@ -252,7 +252,7 @@ const parseRawHostString = (raw: string): { server: string; port?: number; insta
             instance: instanceOnlyMatch[2].trim()
         };
     }
-    
+
     // Handle format "server,port"
     const portOnlyMatch = s.match(/^([^\\,]+),(\d+)$/);
     if (portOnlyMatch) {
@@ -261,7 +261,7 @@ const parseRawHostString = (raw: string): { server: string; port?: number; insta
             port: parseInt(portOnlyMatch[2], 10)
         };
     }
-    
+
     // Plain server/IP
     return { server: s };
 };
@@ -292,7 +292,7 @@ const getCompanyRawConfig = (companyId: number): CompanyRawConfig | null => {
 
 const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequelize> => {
     if (!token) return getDefaultConnection();
-    
+
     try {
         // Get company ID from token
         const companyId = getCompanyIdFromToken(token);
@@ -300,39 +300,39 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
             console.log('No company ID found in token, using default connection');
             return getDefaultConnection();
         }
-        
+
         // Check cache
         if (userPortalConnections.has(companyId)) {
             const cached = userPortalConnections.get(companyId)!;
             console.log(`♻️ Reusing User Portal connection for company ${companyId}`);
             return cached;
         }
-        
+
         // Get raw company configuration
         const companyRawConfig = getCompanyRawConfig(companyId);
         if (!companyRawConfig) {
             console.log(`No raw company config found for ID ${companyId}, using default connection`);
             return getDefaultConnection();
         }
-        
+
         console.log(`Company ${companyId} raw config:`, {
             rawHost: companyRawConfig.rawHost,
             database: companyRawConfig.database,
             user: companyRawConfig.user
         });
-        
+
         // Parse raw host string
         const h = parseRawHostString(companyRawConfig.rawHost);
-        
+
         console.log(`Parsed host:`, {
             server: h.server,
             port: h.port,
             instance: h.instance
         });
-        
+
         // Determine the port to use
         const usePort = h.port !== undefined ? h.port : (h.instance ? undefined : 1433);
-        
+
         console.log(`Connection settings for User_Portal:`, {
             server: h.server,
             port: usePort,
@@ -340,7 +340,7 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
             database: 'User_Portal',
             user: companyRawConfig.user
         });
-        
+
         const baseOpts = buildDialectOptions(h.instance, h.port);
         const userPortalConnection = new Sequelize({
             dialect: 'mssql',
@@ -377,14 +377,14 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
                 max: 3
             }
         });
-        
+
         await userPortalConnection.authenticate();
         console.log(`✅ Connected to User_Portal on company host: ${companyRawConfig.rawHost}`);
-        
+
         // Cache the connection
         userPortalConnections.set(companyId, userPortalConnection);
         return userPortalConnection;
-        
+
     } catch (error) {
         console.error('Error connecting to User_Portal via company host:', error);
         console.log('⚠️ Falling back to default User Portal connection');
@@ -404,7 +404,7 @@ const getUserInfoFromToken = async (token: string | null): Promise<UserInfo | nu
              WHERE Autheticate_Id = :token AND UDel_Flag = 0`,
             { replacements: { token }, type: QueryTypes.SELECT },
         ) as any[];
-        
+
         if (rows.length > 0) {
             return {
                 userTypeId: Number(rows[0].UserTypeId),
@@ -453,7 +453,7 @@ const getUserMenuRights = async (token: string | null): Promise<MenuRow[] | fals
                 `SELECT * FROM tbl_AppMenu`,
                 { type: QueryTypes.SELECT }
             ) as Promise<MenuRow[]>,
-            
+
             localUserId ? companyDB.query(
                 `SELECT
                     ur.MenuId,
@@ -466,7 +466,7 @@ const getUserMenuRights = async (token: string | null): Promise<MenuRow[] | fals
                  WHERE ur.UserId = :localUserId`,
                 { replacements: { localUserId }, type: QueryTypes.SELECT }
             ) as Promise<any[]> : Promise.resolve([]),
-            
+
             companyDB.query(
                 `SELECT
                     utr.MenuId,
@@ -520,7 +520,7 @@ const getUserRightsForSpecificUser = async (targetUserId: number, token: string 
         ) as MenuRow[];
 
         const isAdmin = currentUserInfo && (isEqualNumber(currentUserInfo.userTypeId, 0) || isEqualNumber(currentUserInfo.userTypeId, 1));
-        
+
         if (isAdmin) {
             const rows: MenuRow[] = menus.map(m => ({
                 ...m,
@@ -551,9 +551,9 @@ const getUserRightsForSpecificUser = async (targetUserId: number, token: string 
             `SELECT UserTypeId, Local_User_ID FROM tbl_Users WHERE Global_User_ID = :targetUserId AND UDel_Flag = 0`,
             { replacements: { targetUserId }, type: QueryTypes.SELECT },
         ) as any[];
-        
+
         let userTypeRights: Array<any> = [];
-        
+
         if (targetUserInfo.length > 0) {
             const targetUserTypeId = targetUserInfo[0].UserTypeId;
             userTypeRights = await companyDB.query(
@@ -603,30 +603,80 @@ const getUserBasedRights = async (userId: number, token: string | null): Promise
             { type: QueryTypes.SELECT }
         ) as MenuRow[];
 
-        const userRights = await companyDB.query(
-            `SELECT MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights
-             FROM tbl_AppMenu_UserRights
-             WHERE UserId = :userId`,
-            { replacements: { userId }, type: QueryTypes.SELECT },
-        ) as any[];
+        const defaultPortalDB = getDefaultConnection();
+        let targetUserInfo: any[] = [];
+
+        try {
+            targetUserInfo = await portalDB.query(
+                `SELECT UserTypeId, Local_User_ID, Global_User_ID FROM tbl_Users WHERE (Global_User_ID = :userId OR Local_User_ID = :userId OR UserId = :userId) AND UDel_Flag = 0`,
+                { replacements: { userId }, type: QueryTypes.SELECT },
+            ) as any[];
+        } catch {
+            targetUserInfo = [];
+        }
+
+        if (!targetUserInfo.length) {
+            try {
+                targetUserInfo = await defaultPortalDB.query(
+                    `SELECT UserTypeId, Local_User_ID, Global_User_ID FROM tbl_Users WHERE (Global_User_ID = :userId OR Local_User_ID = :userId OR UserId = :userId) AND UDel_Flag = 0`,
+                    { replacements: { userId }, type: QueryTypes.SELECT },
+                ) as any[];
+            } catch {
+                targetUserInfo = [];
+            }
+        }
+
+        const userObj = targetUserInfo[0] || null;
+        const userTypeId = userObj ? Number(userObj.UserTypeId) : null;
+        const localUserId = userObj?.Local_User_ID != null ? Number(userObj.Local_User_ID) : userId;
+        const globalUserId = userObj?.Global_User_ID != null ? Number(userObj.Global_User_ID) : userId;
+
+        if (userTypeId !== null && (isEqualNumber(userTypeId, 0) || isEqualNumber(userTypeId, 1))) {
+            const rows: MenuRow[] = menus.map(m => ({
+                ...m,
+                Read_Rights: 1,
+                Add_Rights: 1,
+                Edit_Rights: 1,
+                Delete_Rights: 1,
+                Print_Rights: 1,
+            }));
+            return rows;
+        }
+
+        const [userRights, userTypeRights] = await Promise.all([
+            companyDB.query(
+                `SELECT MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights
+                 FROM tbl_AppMenu_UserRights
+                 WHERE UserId = :userId OR UserId = :localUserId OR UserId = :globalUserId`,
+                { replacements: { userId, localUserId, globalUserId }, type: QueryTypes.SELECT },
+            ) as Promise<any[]>,
+            userTypeId != null ? companyDB.query(
+                `SELECT MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights
+                 FROM tbl_AppMenu_UserTypeRights
+                 WHERE UserTypeId = :userTypeId`,
+                { replacements: { userTypeId }, type: QueryTypes.SELECT },
+            ) as Promise<any[]> : Promise.resolve([])
+        ]);
 
         const urMap = new Map(userRights.map(r => [r.MenuId, r]));
+        const utrMap = new Map(userTypeRights.map(r => [r.MenuId, r]));
 
         const rows: MenuRow[] = menus.map(m => {
             const ur = urMap.get(m.id);
+            const utr = utrMap.get(m.id);
             return {
                 ...m,
-                Read_Rights: ur?.Read_Rights ?? 0,
-                Add_Rights: ur?.Add_Rights ?? 0,
-                Edit_Rights: ur?.Edit_Rights ?? 0,
-                Delete_Rights: ur?.Delete_Rights ?? 0,
-                Print_Rights: ur?.Print_Rights ?? 0,
+                Read_Rights: ur?.Read_Rights ?? utr?.Read_Rights ?? 0,
+                Add_Rights: ur?.Add_Rights ?? utr?.Add_Rights ?? 0,
+                Edit_Rights: ur?.Edit_Rights ?? utr?.Edit_Rights ?? 0,
+                Delete_Rights: ur?.Delete_Rights ?? utr?.Delete_Rights ?? 0,
+                Print_Rights: ur?.Print_Rights ?? utr?.Print_Rights ?? 0,
             };
         });
 
         return rows;
     } catch (e) {
-        console.error(e);
+        console.error('Error in getUserBasedRights:', e);
         return false;
     }
 };
@@ -641,12 +691,34 @@ const getUserTypeBasedRights = async (userType: number, token: string | null): P
             { type: QueryTypes.SELECT }
         ) as MenuRow[];
 
-        const typeRights = await companyDB.query(
-            `SELECT MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights
-             FROM tbl_AppMenu_UserTypeRights
-             WHERE UserTypeId = :userType`,
-            { replacements: { userType }, type: QueryTypes.SELECT },
-        ) as any[];
+        if (isEqualNumber(userType, 0) || isEqualNumber(userType, 1)) {
+            const rows: MenuRow[] = menus.map(m => ({
+                ...m,
+                Read_Rights: 1,
+                Add_Rights: 1,
+                Edit_Rights: 1,
+                Delete_Rights: 1,
+                Print_Rights: 1,
+            }));
+            return rows;
+        }
+
+        let typeRights: any[] = [];
+        try {
+            typeRights = await companyDB.query(
+                `SELECT MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights
+                 FROM tbl_AppMenu_UserTypeRights
+                 WHERE UserTypeId = :userType OR UserType = :userType`,
+                { replacements: { userType }, type: QueryTypes.SELECT },
+            ) as any[];
+        } catch {
+            typeRights = await companyDB.query(
+                `SELECT MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights
+                 FROM tbl_AppMenu_UserTypeRights
+                 WHERE UserTypeId = :userType`,
+                { replacements: { userType }, type: QueryTypes.SELECT },
+            ) as any[];
+        }
 
         const utrMap = new Map(typeRights.map(r => [r.MenuId, r]));
 
@@ -664,7 +736,7 @@ const getUserTypeBasedRights = async (userType: number, token: string | null): P
 
         return rows;
     } catch (e) {
-        console.error(e);
+        console.error('Error in getUserTypeBasedRights:', e);
         return false;
     }
 };
@@ -677,12 +749,12 @@ const appMenu = () => {
         try {
             const { MenuName, MenuId } = req.query as Record<string, string>;
             const token = extractToken(req);
-            
+
             if (!token) {
                 invalidInput(res, 'Authorization token required');
                 return;
             }
-            
+
             const userRights = await getUserMenuRights(token);
 
             if (!Array.isArray(userRights)) {
@@ -713,14 +785,14 @@ const appMenu = () => {
         try {
             const { UserId, MenuName, MenuId } = req.query as Record<string, string>;
             const token = extractToken(req);
-            
+
             if (!token) {
                 invalidInput(res, 'Authorization token required');
                 return;
             }
-            
+
             let userRightsData: MenuRow[] | false;
-            
+
             if (UserId && isValidNumber(UserId)) {
                 userRightsData = await getUserRightsForSpecificUser(Number(UserId), token);
             } else if (UserId && !isValidNumber(UserId)) {
@@ -787,7 +859,7 @@ const appMenu = () => {
             const token = extractToken(req);
             const userInfo = await getUserInfoFromToken(token);
             const localUserId = userInfo?.localUserId || null;
-            
+
             if (!localUserId) {
                 failed(res, 'User not found');
                 return;
@@ -812,47 +884,189 @@ const appMenu = () => {
     };
 
     const newModifyUserRights = async (req: Request, res: Response): Promise<void> => {
-        const { MenuId, User, ReadRights, AddRights, EditRights, DeleteRights, PrintRights } =
-            req.body as ModifyUserRightsBody;
-        const token = extractToken(req);
-        const companyDB = await getCompanyDB(token);
-
         try {
-            await companyDB.transaction(async (t) => {
-                await companyDB.query(
-                    `DELETE FROM tbl_AppMenu_UserRights WHERE UserId = :User AND MenuId = :MenuId`,
-                    { replacements: { User, MenuId }, type: QueryTypes.DELETE, transaction: t },
-                );
+            const token = extractToken(req);
+            const companyDB = await getCompanyDB(token);
 
-                await companyDB.query(
-                    `INSERT INTO tbl_AppMenu_UserRights
-                        (UserId, MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights)
-                     VALUES
-                        (:User, :MenuId, :ReadRights, :AddRights, :EditRights, :DeleteRights, :PrintRights)`,
-                    {
-                        replacements: { User, MenuId, ReadRights, AddRights, EditRights, DeleteRights, PrintRights },
-                        type: QueryTypes.INSERT,
-                        transaction: t,
-                    },
-                );
+            if (!companyDB) {
+                failed(res, 'Database connection unavailable');
+                return;
+            }
+
+            const body = req.body;
+            const rawBody = Array.isArray(body)
+                ? body
+                : (body?.userRights || body?.userTypeRights || body?.rights || body?.data || body?.items || body);
+            const rawItems = Array.isArray(rawBody) ? rawBody : [rawBody];
+
+            const parseRights = (val: any) => (val === 1 || val === '1' || val === true ? 1 : 0);
+
+            const userItems: Array<{
+                targetUserId: number;
+                MenuId: number;
+                ReadRights: number;
+                AddRights: number;
+                EditRights: number;
+                DeleteRights: number;
+                PrintRights: number;
+            }> = [];
+
+            const userTypeItems: Array<{
+                targetUserTypeId: number;
+                MenuId: number;
+                ReadRights: number;
+                AddRights: number;
+                EditRights: number;
+                DeleteRights: number;
+                PrintRights: number;
+            }> = [];
+
+            rawItems.forEach(item => {
+                if (!item || typeof item !== 'object') return;
+
+                const menuIdRaw = item.MenuId ?? item.menuId ?? item.Menu_Id ?? item.menu_id ?? item.id ?? item.Id;
+                const menuId = Number(menuIdRaw);
+                if (!menuIdRaw || isNaN(menuId)) return;
+
+                const readRights = parseRights(item.ReadRights ?? item.Read_Rights ?? item.readRights ?? item.read_rights);
+                const addRights = parseRights(item.AddRights ?? item.Add_Rights ?? item.addRights ?? item.add_rights);
+                const editRights = parseRights(item.EditRights ?? item.Edit_Rights ?? item.editRights ?? item.edit_rights);
+                const deleteRights = parseRights(item.DeleteRights ?? item.Delete_Rights ?? item.deleteRights ?? item.delete_rights);
+                const printRights = parseRights(item.PrintRights ?? item.Print_Rights ?? item.printRights ?? item.print_rights);
+
+                const rawUserId = item.User ?? item.UserId ?? item.userId ?? item.user ?? item.User_Id ?? item.user_id;
+                const numUserId = Number(rawUserId);
+
+                if (rawUserId !== undefined && rawUserId !== null && !isNaN(numUserId) && numUserId > 0) {
+                    userItems.push({
+                        targetUserId: numUserId,
+                        MenuId: menuId,
+                        ReadRights: readRights,
+                        AddRights: addRights,
+                        EditRights: editRights,
+                        DeleteRights: deleteRights,
+                        PrintRights: printRights,
+                    });
+                }
+
+                const rawUserTypeId = item.UserType ?? item.UserTypeId ?? item.userTypeId ?? item.userType ?? item.User_Type_Id ?? item.user_type_id;
+                const numUserTypeId = Number(rawUserTypeId);
+
+                if (rawUserTypeId !== undefined && rawUserTypeId !== null && !isNaN(numUserTypeId) && numUserTypeId > 0 && (rawUserId === undefined || rawUserId === null || numUserId <= 0)) {
+                    userTypeItems.push({
+                        targetUserTypeId: numUserTypeId,
+                        MenuId: menuId,
+                        ReadRights: readRights,
+                        AddRights: addRights,
+                        EditRights: editRights,
+                        DeleteRights: deleteRights,
+                        PrintRights: printRights,
+                    });
+                }
             });
+
+            if (userItems.length > 0 || userTypeItems.length > 0) {
+                await companyDB.transaction(async (t) => {
+                    if (userItems.length > 0) {
+                        const chunkSize = 100;
+                        for (let i = 0; i < userItems.length; i += chunkSize) {
+                            const chunk = userItems.slice(i, i + chunkSize);
+
+                            const deleteClauses: string[] = [];
+                            const deleteReplacements: Record<string, any> = {};
+                            const insertValues: string[] = [];
+                            const insertReplacements: Record<string, any> = {};
+
+                            chunk.forEach((item, idx) => {
+                                deleteClauses.push(`(UserId = :u${idx} AND MenuId = :m${idx})`);
+                                deleteReplacements[`u${idx}`] = item.targetUserId;
+                                deleteReplacements[`m${idx}`] = item.MenuId;
+
+                                insertValues.push(`(:iu${idx}, :im${idx}, :ir${idx}, :ia${idx}, :ie${idx}, :id${idx}, :ip${idx})`);
+                                insertReplacements[`iu${idx}`] = item.targetUserId;
+                                insertReplacements[`im${idx}`] = item.MenuId;
+                                insertReplacements[`ir${idx}`] = item.ReadRights;
+                                insertReplacements[`ia${idx}`] = item.AddRights;
+                                insertReplacements[`ie${idx}`] = item.EditRights;
+                                insertReplacements[`id${idx}`] = item.DeleteRights;
+                                insertReplacements[`ip${idx}`] = item.PrintRights;
+                            });
+
+                            await companyDB.query(
+                                `DELETE FROM tbl_AppMenu_UserRights WHERE ${deleteClauses.join(' OR ')}`,
+                                { replacements: deleteReplacements, type: QueryTypes.DELETE, transaction: t },
+                            );
+
+                            await companyDB.query(
+                                `INSERT INTO tbl_AppMenu_UserRights
+                                    (UserId, MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights)
+                                 VALUES
+                                    ${insertValues.join(',\n')}`,
+                                { replacements: insertReplacements, type: QueryTypes.INSERT, transaction: t },
+                            );
+                        }
+                    }
+
+                    if (userTypeItems.length > 0) {
+                        const chunkSize = 100;
+                        for (let i = 0; i < userTypeItems.length; i += chunkSize) {
+                            const chunk = userTypeItems.slice(i, i + chunkSize);
+
+                            const deleteClauses: string[] = [];
+                            const deleteReplacements: Record<string, any> = {};
+                            const insertValues: string[] = [];
+                            const insertReplacements: Record<string, any> = {};
+
+                            chunk.forEach((item, idx) => {
+                                deleteClauses.push(`(UserTypeId = :u${idx} AND MenuId = :m${idx})`);
+                                deleteReplacements[`u${idx}`] = item.targetUserTypeId;
+                                deleteReplacements[`m${idx}`] = item.MenuId;
+
+                                insertValues.push(`(:iu${idx}, :im${idx}, :ir${idx}, :ia${idx}, :ie${idx}, :id${idx}, :ip${idx})`);
+                                insertReplacements[`iu${idx}`] = item.targetUserTypeId;
+                                insertReplacements[`im${idx}`] = item.MenuId;
+                                insertReplacements[`ir${idx}`] = item.ReadRights;
+                                insertReplacements[`ia${idx}`] = item.AddRights;
+                                insertReplacements[`ie${idx}`] = item.EditRights;
+                                insertReplacements[`id${idx}`] = item.DeleteRights;
+                                insertReplacements[`ip${idx}`] = item.PrintRights;
+                            });
+
+                            await companyDB.query(
+                                `DELETE FROM tbl_AppMenu_UserTypeRights WHERE ${deleteClauses.join(' OR ')}`,
+                                { replacements: deleteReplacements, type: QueryTypes.DELETE, transaction: t },
+                            );
+
+                            await companyDB.query(
+                                `INSERT INTO tbl_AppMenu_UserTypeRights
+                                    (UserTypeId, MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights)
+                                 VALUES
+                                    ${insertValues.join(',\n')}`,
+                                { replacements: insertReplacements, type: QueryTypes.INSERT, transaction: t },
+                            );
+                        }
+                    }
+                });
+            }
 
             success(res, 'Changes saved successfully.');
         } catch (e) {
+            console.error('Error in newModifyUserRights:', e);
             servError(e, res);
         }
     };
 
     const getNewUserTypeBasedRights = async (req: Request, res: Response): Promise<void> => {
-        const { UserType } = req.query as Record<string, string>;
-        if (!UserType) {
+        const { UserType, UserTypeId, userTypeId, userType } = req.query as Record<string, string>;
+        const targetUserTypeId = UserType || UserTypeId || userTypeId || userType;
+        if (!targetUserTypeId) {
             invalidInput(res, 'UserType is required');
             return;
         }
 
         try {
             const token = extractToken(req);
-            const result = await getUserTypeBasedRights(Number(UserType), token);
+            const result = await getUserTypeBasedRights(Number(targetUserTypeId), token);
 
             if (!Array.isArray(result)) {
                 failed(res);
@@ -871,33 +1085,107 @@ const appMenu = () => {
     };
 
     const newModifyUserTypeRights = async (req: Request, res: Response): Promise<void> => {
-        const { MenuId, UserType, ReadRights, AddRights, EditRights, DeleteRights, PrintRights } =
-            req.body as ModifyUserTypeRightsBody;
-        const token = extractToken(req);
-        const companyDB = await getCompanyDB(token);
-
         try {
-            await companyDB.transaction(async (t) => {
-                await companyDB.query(
-                    `DELETE FROM tbl_AppMenu_UserTypeRights WHERE UserTypeId = :UserType AND MenuId = :MenuId`,
-                    { replacements: { UserType, MenuId }, type: QueryTypes.DELETE, transaction: t },
-                );
+            const token = extractToken(req);
+            const companyDB = await getCompanyDB(token);
 
-                await companyDB.query(
-                    `INSERT INTO tbl_AppMenu_UserTypeRights
-                        (UserTypeId, MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights)
-                     VALUES
-                        (:UserType, :MenuId, :ReadRights, :AddRights, :EditRights, :DeleteRights, :PrintRights)`,
-                    {
-                        replacements: { UserType, MenuId, ReadRights, AddRights, EditRights, DeleteRights, PrintRights },
-                        type: QueryTypes.INSERT,
-                        transaction: t,
-                    },
-                );
+            if (!companyDB) {
+                failed(res, 'Database connection unavailable');
+                return;
+            }
+
+            const body = req.body;
+            const rawBody = Array.isArray(body)
+                ? body
+                : (body?.userTypeRights || body?.userRights || body?.rights || body?.data || body?.items || body);
+            const rawItems = Array.isArray(rawBody) ? rawBody : [rawBody];
+
+            const parseRights = (val: any) => (val === 1 || val === '1' || val === true ? 1 : 0);
+
+            const userTypeItems: Array<{
+                targetUserTypeId: number;
+                MenuId: number;
+                ReadRights: number;
+                AddRights: number;
+                EditRights: number;
+                DeleteRights: number;
+                PrintRights: number;
+            }> = [];
+
+            rawItems.forEach(item => {
+                if (!item || typeof item !== 'object') return;
+
+                const menuIdRaw = item.MenuId ?? item.menuId ?? item.Menu_Id ?? item.menu_id ?? item.id ?? item.Id;
+                const menuId = Number(menuIdRaw);
+                if (!menuIdRaw || isNaN(menuId)) return;
+
+                const rawUserTypeId = item.UserType ?? item.UserTypeId ?? item.userTypeId ?? item.userType ?? item.User_Type_Id ?? item.user_type_id;
+                const numUserTypeId = Number(rawUserTypeId);
+                if (rawUserTypeId === undefined || rawUserTypeId === null || isNaN(numUserTypeId)) return;
+
+                const readRights = parseRights(item.ReadRights ?? item.Read_Rights ?? item.readRights ?? item.read_rights);
+                const addRights = parseRights(item.AddRights ?? item.Add_Rights ?? item.addRights ?? item.add_rights);
+                const editRights = parseRights(item.EditRights ?? item.Edit_Rights ?? item.editRights ?? item.edit_rights);
+                const deleteRights = parseRights(item.DeleteRights ?? item.Delete_Rights ?? item.deleteRights ?? item.delete_rights);
+                const printRights = parseRights(item.PrintRights ?? item.Print_Rights ?? item.printRights ?? item.print_rights);
+
+                userTypeItems.push({
+                    targetUserTypeId: numUserTypeId,
+                    MenuId: menuId,
+                    ReadRights: readRights,
+                    AddRights: addRights,
+                    EditRights: editRights,
+                    DeleteRights: deleteRights,
+                    PrintRights: printRights,
+                });
             });
+
+            if (userTypeItems.length > 0) {
+                await companyDB.transaction(async (t) => {
+                    const chunkSize = 100;
+                    for (let i = 0; i < userTypeItems.length; i += chunkSize) {
+                        const chunk = userTypeItems.slice(i, i + chunkSize);
+
+                        const deleteClauses: string[] = [];
+                        const deleteReplacements: Record<string, any> = {};
+
+                        const insertValues: string[] = [];
+                        const insertReplacements: Record<string, any> = {};
+
+                        chunk.forEach((item, idx) => {
+                            deleteClauses.push(`(UserTypeId = :u${idx} AND MenuId = :m${idx})`);
+                            deleteReplacements[`u${idx}`] = item.targetUserTypeId;
+                            deleteReplacements[`m${idx}`] = item.MenuId;
+
+                            insertValues.push(`(:iu${idx}, :im${idx}, :ir${idx}, :ia${idx}, :ie${idx}, :id${idx}, :ip${idx})`);
+                            insertReplacements[`iu${idx}`] = item.targetUserTypeId;
+                            insertReplacements[`im${idx}`] = item.MenuId;
+                            insertReplacements[`ir${idx}`] = item.ReadRights;
+                            insertReplacements[`ia${idx}`] = item.AddRights;
+                            insertReplacements[`ie${idx}`] = item.EditRights;
+                            insertReplacements[`id${idx}`] = item.DeleteRights;
+                            insertReplacements[`ip${idx}`] = item.PrintRights;
+                        });
+
+                        await companyDB.query(
+                            `DELETE FROM tbl_AppMenu_UserTypeRights WHERE ${deleteClauses.join(' OR ')}`,
+                            { replacements: deleteReplacements, type: QueryTypes.DELETE, transaction: t },
+                        );
+
+                        await companyDB.query(
+                            `INSERT INTO tbl_AppMenu_UserTypeRights
+                                (UserTypeId, MenuId, Read_Rights, Add_Rights, Edit_Rights, Delete_Rights, Print_Rights)
+                             VALUES
+                                ${insertValues.join(',\n')}`,
+                            { replacements: insertReplacements, type: QueryTypes.INSERT, transaction: t },
+                        );
+                    }
+                });
+            }
 
             success(res, 'Changes saved successfully.');
         } catch (e) {
+            console.error('Error in newModifyUserTypeRights:', e);
             servError(e, res);
         }
     };
@@ -909,7 +1197,7 @@ const appMenu = () => {
         } = req.body as CreateMenuBody;
 
         const token = extractToken(req);
-        
+
         if (!token) {
             invalidInput(res, 'Authorization token required');
             return;
@@ -946,7 +1234,7 @@ const appMenu = () => {
         } = req.body as UpdateMenuBody;
 
         const token = extractToken(req);
-        
+
         if (!token) {
             invalidInput(res, 'Authorization token required');
             return;
@@ -985,7 +1273,7 @@ const appMenu = () => {
 
     const listMenu = async (req: Request, res: Response): Promise<void> => {
         const token = extractToken(req);
-        
+
         if (!token) {
             invalidInput(res, 'Authorization token required');
             return;

@@ -203,6 +203,64 @@ AuthorizationRouter.get('/userRights', authenticate, menuController.userRights);
 
 /**
  * @swagger
+ * /api/configuration/appMenu/userRights/userBased:
+ *   get:
+ *     summary: Get user-based menu rights
+ *     description: Fetch menu rights and structure for a specific user ID
+ *     tags: [Menu Management]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: UserId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: User ID
+ *         example: 200
+ *     responses:
+ *       200:
+ *         description: User rights retrieved successfully
+ *       400:
+ *         description: UserId parameter is required
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+AuthorizationRouter.get('/userRights/userBased', authenticate, menuController.getNewUserBasedRights);
+
+/**
+ * @swagger
+ * /api/configuration/appMenu/getNewUserBasedRights:
+ *   get:
+ *     summary: Get user-based menu rights (alternative endpoint)
+ *     description: Alternative endpoint to fetch menu rights for a specific user ID
+ *     tags: [Menu Management]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: UserId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: User ID
+ *         example: 200
+ *     responses:
+ *       200:
+ *         description: User rights retrieved successfully
+ *       400:
+ *         description: UserId parameter is required
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+AuthorizationRouter.get('/getNewUserBasedRights', authenticate, menuController.getNewUserBasedRights);
+
+/**
+ * @swagger
  * /api/configuration/appMenu/userRights:
  *   post:
  *     summary: Modify user menu rights
@@ -280,6 +338,7 @@ AuthorizationRouter.get('/userRights', authenticate, menuController.userRights);
  *         description: Internal server error
  */
 AuthorizationRouter.post('/userRights', authenticate, menuController.newModifyUserRights);
+AuthorizationRouter.put('/userRights', authenticate, menuController.newModifyUserRights);
 
 /**
  * @swagger
@@ -346,6 +405,8 @@ AuthorizationRouter.post('/userRights', authenticate, menuController.newModifyUs
  *         description: Internal server error
  */
 AuthorizationRouter.get('/userTypeRights', authenticate, menuController.getNewUserTypeBasedRights);
+AuthorizationRouter.get('/userRights/userTypeBased', authenticate, menuController.getNewUserTypeBasedRights);
+AuthorizationRouter.get('/userTypeRights/userTypeBased', authenticate, menuController.getNewUserTypeBasedRights);
 
 /**
  * @swagger
@@ -426,6 +487,11 @@ AuthorizationRouter.get('/userTypeRights', authenticate, menuController.getNewUs
  *         description: Internal server error
  */
 AuthorizationRouter.post('/userTypeRights', authenticate, menuController.newModifyUserTypeRights);
+AuthorizationRouter.put('/userTypeRights', authenticate, menuController.newModifyUserTypeRights);
+AuthorizationRouter.post('/userRights/userTypeBased', authenticate, menuController.newModifyUserTypeRights);
+AuthorizationRouter.put('/userRights/userTypeBased', authenticate, menuController.newModifyUserTypeRights);
+AuthorizationRouter.post('/userTypeRights/userTypeBased', authenticate, menuController.newModifyUserTypeRights);
+AuthorizationRouter.put('/userTypeRights/userTypeBased', authenticate, menuController.newModifyUserTypeRights);
 
 /**
  * @swagger

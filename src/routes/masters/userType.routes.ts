@@ -32,7 +32,29 @@ const router = Router();
  *   4. requireCompanyDB   — block if no company DB resolved
  */
 
-// ── Read endpoints — open to ALL authenticated users ──────────────────────────
+/**
+ * @swagger
+ * tags:
+ *   name: User Type Master
+ *   description: User type role management APIs
+ */
+
+/**
+ * @swagger
+ * /api/masters/userType:
+ *   get:
+ *     summary: Get all user types
+ *     tags: [User Type Master]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved user types
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
 
 // GET /api/masters/user-type/my-role
 // ⚠️ /my-role MUST be before /:id — otherwise Express treats "my-role" as an id param
