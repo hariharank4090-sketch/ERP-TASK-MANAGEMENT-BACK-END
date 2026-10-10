@@ -352,11 +352,12 @@ function loadCompanyConfigurations(): void {
     console.log('📂 Loading company configurations from .env...');
 
     for (let i = 1; i <= 10; i++) {
-        const companyId  = parseInt(process.env[`COMPANY${i}_ID`] ?? '0', 10);
         const dbName     = process.env[`COMPANY${i}_DATABASE`];
         const dbHost     = process.env[`COMPANY${i}_DB_HOST`];
         const dbUser     = process.env[`COMPANY${i}_DB_USER`];
         const dbPassword = process.env[`COMPANY${i}_DB_PASSWORD`];
+        const rawCompanyId = process.env[`COMPANY${i}_ID`];
+        const companyId  = parseInt(rawCompanyId ?? `${i}`, 10);
 
         if (!companyId || !dbName || !dbHost || !dbUser || !dbPassword) continue;
 
@@ -419,6 +420,25 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
     } else {
         config   = getCompanyConfigByDBName(identifier);
         cacheKey = `db_${identifier}`;
+    }
+
+    if (!config && typeof identifier === 'string') {
+        const parsed = parseInt(identifier, 10);
+        if (!isNaN(parsed)) {
+            config = getCompanyConfig(parsed);
+        }
+    }
+
+    if (!config && typeof identifier === 'number') {
+        const mappingStr = process.env.DB_NAME_MAPPING || '';
+        const pairs = mappingStr.split(',');
+        for (const pair of pairs) {
+            const [db, id] = pair.split('=');
+            if (parseInt(id, 10) === identifier) {
+                config = getCompanyConfigByDBName(db.trim());
+                if (config) break;
+            }
+        }
     }
 
     if (!config) throw new Error(`No DB configuration found for: ${identifier}`);
@@ -541,8 +561,22 @@ export async function getUserDatabaseConnectionFromToken(token: string): Promise
     const session = verifyTokenSession(token);
     if (!session) throw new Error('Invalid or expired token');
 
-    if (session.dbName)    return getCompanyDatabase(session.dbName);
-    if (session.companyId) return getCompanyDatabase(session.companyId);
+    if (session.companyId) {
+        try {
+            return await getCompanyDatabase(session.companyId);
+        } catch (err) {
+            console.warn(`⚠️ getCompanyDatabase failed for companyId ${session.companyId}, trying dbName ${session.dbName}:`, err);
+        }
+    }
+
+    if (session.dbName) {
+        try {
+            return await getCompanyDatabase(session.dbName);
+        } catch (err) {
+            console.warn(`⚠️ getCompanyDatabase failed for dbName ${session.dbName}:`, err);
+        }
+    }
+
     return getDefaultConnection();
 }
 
