@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import { UserMaster } from "../../../models/masters/users/users.model";
+import { initUserModel } from "../../../models/masters/users/users.model";
+import { getDefaultConnection } from "../../../config/database.config";
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
     const authHeader = req.header("Authorization");
@@ -15,7 +16,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
     
     try {
-        const user = await UserMaster.findOne({
+        const UserModel = initUserModel(getDefaultConnection());
+        const user = await UserModel.findOne({
             where: {
                 Autheticate_Id: authenticateId,
                 UDel_Flag: 0

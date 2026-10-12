@@ -8,14 +8,13 @@ import path from 'path';
 import fs from 'fs';
 import swaggerUi from 'swagger-ui-express';
 
-import { sequelize, getConnectionStats } from './config/database.config';
+import { sequelize, getConnectionStats, closeAllCompanyConnections } from './config/database.config';
 import { swaggerSpec } from './config/swagger';
 import { createUploadFolders } from './middleware/createUploadFolders';
 import { setCompanyDatabase } from './middleware/companyDb.middleware';
 
 import authRoutes from './routes/configuration/login.route';
 import appRoutes from './routes/index.route';
-import { closeAllCompanyConnections } from './config/sequalizer';
 
 dotenv.config();
 

@@ -2,7 +2,7 @@ import express from 'express';
 
 import userTypeRoutes from './userType.routes';
 import taskTypeRoutes from './taskType.routes';
-import projectRoutes from './project.routes';       
+import projectRoutes from './project.routes';
 
 import processMasterRoutes from './processMaster.routes';
 import taskParamTypeRoutes from './taskParamType.route';
@@ -16,8 +16,8 @@ import employees from './employeemaster.route';
 import projectSchedule from './projectSchedule.route';
 import projectScheduleEmp from './projectScheduleEmp.route';
 import WorkParameter from './workParameter.routes';
-import  WorkMaster  from './workMaster.routes';
-import  TaskEmployeeParameters from './TaskEmployeeParameters.router';
+import WorkMaster from './workMaster.routes';
+import TaskEmployeeParameters from './TaskEmployeeParameters.router';
 import leavemaster from './leave.routes';
 import branchMasterRoutes from './branchMaster.route';
 import ticketRoutes from './ticket.route';
@@ -28,25 +28,25 @@ const router = express.Router();
 router.use('/userType', userTypeRoutes);
 router.use('/user-type', userTypeRoutes);
 router.use('/taskType', taskTypeRoutes)
-router.use('/project',projectRoutes)
+router.use('/project', projectRoutes)
 
-router.use('/processMaster',processMasterRoutes)
+router.use('/processMaster', processMasterRoutes)
 // router.use('/projectEmployee',ProjectEmployee)
-router.use('/parametDataTypes',taskParamTypeRoutes)
-router.use('/paramMaster',paramMasterRoutes)
-router.use('/dropdowns',dropdownRoutes)
-router.use('/users',userRoutes)
+router.use('/parametDataTypes', taskParamTypeRoutes)
+router.use('/paramMaster', paramMasterRoutes)
+router.use('/dropdowns', dropdownRoutes)
+router.use('/users', userRoutes)
 
-router.use('/tasks',taskRoutes)
+router.use('/tasks', taskRoutes)
 // router.use('/company',taskRoutes)
-router.use('/Leavetype',LeavetypeRoutes)
-router.use('/employees',employees)
-router.use('/projectSchedule',projectSchedule)
-router.use('/projectScheduleEmp',projectScheduleEmp)
-router.use('/workParameter',WorkParameter)
-router.use('/taskParameterDetails',TaskEmployeeParameters)
-router.use('/workMaster',WorkMaster)
-router.use('/leave',leavemaster)
+router.use('/Leavetype', LeavetypeRoutes)
+router.use('/employees', employees)
+router.use('/projectSchedule', projectSchedule)
+router.use('/projectScheduleEmp', projectScheduleEmp)
+router.use('/workParameter', WorkParameter)
+router.use('/taskParameterDetails', TaskEmployeeParameters)
+router.use('/workMaster', WorkMaster)
+router.use('/leave', leavemaster)
 router.use('/branch', branchMasterRoutes)
 router.use('/tickets', ticketRoutes);
 router.use('/ticketTasks', ticketTaskRoutes);

@@ -100,33 +100,6 @@ const validateDateRange = (
     return { valid: true };
 };
 
-async function getNextAId(db: Sequelize, transaction: Transaction): Promise<number> {
-    const maxAIdResult = await db.query(
-        `SELECT ISNULL(MAX(A_Id), 0) + 1 as NextId FROM tbl_Project_Sch_Task_DT`,
-        { type: QueryTypes.SELECT, transaction }
-    ) as any[];
-
-    let nextAId = maxAIdResult[0]?.NextId || 1;
-
-    const aIdCheck = await db.query(
-        `SELECT 1 FROM tbl_Project_Sch_Task_DT WHERE A_Id = ?`,
-        { replacements: [nextAId], type: QueryTypes.SELECT, transaction }
-    ) as any[];
-
-    if (aIdCheck.length > 0) {
-        const availableAIdResult = await db.query(
-            `SELECT TOP 1 t1.A_Id + 1 as AvailableId
-             FROM tbl_Project_Sch_Task_DT t1
-             LEFT JOIN tbl_Project_Sch_Task_DT t2 ON t1.A_Id + 1 = t2.A_Id
-             WHERE t2.A_Id IS NULL
-             ORDER BY t1.A_Id`,
-            { type: QueryTypes.SELECT, transaction }
-        ) as any[];
-        nextAId = availableAIdResult[0]?.AvailableId || nextAId + 1;
-    }
-    return nextAId;
-}
-
 async function insertTaskDates(
     db: Sequelize,
     schId: number,
@@ -135,23 +108,47 @@ async function insertTaskDates(
     estEndTime: string | null,
     transaction: Transaction
 ): Promise<void> {
-    for (const date of dates) {
-        const nextAId = await getNextAId(db, transaction);
+    if (!dates || dates.length === 0) return;
+
+    // Check if A_Id is an IDENTITY column
+    const identityCheck = await db.query(
+        `SELECT COLUMNPROPERTY(OBJECT_ID('tbl_Project_Sch_Task_DT'), 'A_Id', 'IsIdentity') AS isIdentity`,
+        { type: QueryTypes.SELECT, transaction }
+    ) as any[];
+
+    const isIdentity = identityCheck[0]?.isIdentity === 1;
+
+    if (isIdentity) {
+        const valuePlaceholders = dates.map(() => '(?, ?, ?, ?)').join(', ');
+        const replacements: any[] = [];
+        for (const date of dates) {
+            replacements.push(schId, formatDateForSQL(date), estStartTime, estEndTime);
+        }
+        await db.query(
+            `INSERT INTO tbl_Project_Sch_Task_DT
+             (Sch_Id, Task_Work_Date, Task_Start_Time, Task_End_Time)
+             VALUES ${valuePlaceholders}`,
+            { replacements, type: QueryTypes.INSERT, transaction }
+        );
+    } else {
+        // Atomic primary key generation inside transaction using UPDLOCK, HOLDLOCK
+        const maxResult = await db.query(
+            `SELECT ISNULL(MAX(A_Id), 0) as maxId FROM tbl_Project_Sch_Task_DT WITH (UPDLOCK, HOLDLOCK)`,
+            { type: QueryTypes.SELECT, transaction }
+        ) as any[];
+
+        let currentAId = Number(maxResult[0]?.maxId || 0);
+        const valuePlaceholders = dates.map(() => '(?, ?, ?, ?, ?)').join(', ');
+        const replacements: any[] = [];
+        for (const date of dates) {
+            currentAId++;
+            replacements.push(currentAId, schId, formatDateForSQL(date), estStartTime, estEndTime);
+        }
         await db.query(
             `INSERT INTO tbl_Project_Sch_Task_DT
              (A_Id, Sch_Id, Task_Work_Date, Task_Start_Time, Task_End_Time)
-             VALUES (?, ?, ?, ?, ?)`,
-            {
-                replacements: [
-                    nextAId,
-                    schId,
-                    formatDateForSQL(date),
-                    estStartTime,
-                    estEndTime
-                ],
-                type: QueryTypes.INSERT,
-                transaction
-            }
+             VALUES ${valuePlaceholders}`,
+            { replacements, type: QueryTypes.INSERT, transaction }
         );
     }
 }
@@ -231,10 +228,19 @@ function generateTaskDates(
     return dates;
 }
 
-// Helper function to convert string date to Date object without timezone issues
+// Helper function to convert string date to Date object without timezone issues and handling ISO strings safely
 const parseDateString = (dateString: string): Date => {
-    const [year, month, day] = dateString.split('-').map(Number);
-    return new Date(year, month - 1, day);
+    if (!dateString) throw new Error('Invalid date');
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) {
+        const parts = dateString.split('-');
+        if (parts.length === 3 && parts[2].length === 4) {
+            const fallback = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+            if (!isNaN(fallback.getTime())) return fallback;
+        }
+        throw new Error('Invalid date');
+    }
+    return d;
 };
 
 export const getAllSchedules = async (req: Request, res: Response) => {

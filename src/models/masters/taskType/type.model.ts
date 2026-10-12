@@ -353,6 +353,6 @@ export function initTaskTypeModel(sequelize: Sequelize): typeof TaskType {
 }
 
 // Default export for backward compatibility (uses default connection)
-import { sequelize as defaultSequelize } from '../../../config/sequalizer';
+import { sequelize as defaultSequelize } from '../../../config/database.config';
 export const TaskTypeModel = initTaskTypeModel(defaultSequelize);
 export default TaskTypeModel;

@@ -128,6 +128,6 @@ export function initParametDataTypeModel(sequelize: Sequelize): typeof ParametDa
 }
 
 // Default export for backward compatibility
-import { sequelize as defaultSequelize } from '../../../config/sequalizer';
+import { sequelize as defaultSequelize } from '../../../config/database.config';
 export const ParametDataTypeModel = initParametDataTypeModel(defaultSequelize);
 export default ParametDataTypeModel;

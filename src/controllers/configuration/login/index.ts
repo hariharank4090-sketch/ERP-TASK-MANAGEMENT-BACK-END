@@ -59,11 +59,13 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         const UserModel = initUserModel(sequelize);
         const CompanyModel = initCompanyModel(sequelize);
 
-        UserModel.belongsTo(CompanyModel, {
-            foreignKey: 'Company_Id',
-            targetKey: 'Local_Comp_Id',
-            as: 'Company',
-        });
+        if (!UserModel.associations.Company) {
+            UserModel.belongsTo(CompanyModel, {
+                foreignKey: 'Company_Id',
+                targetKey: 'Local_Comp_Id',
+                as: 'Company',
+            });
+        }
 
         const rawCompanyId = req.body.companyId || req.body.Company_Id || req.body.company_id || req.body.CompanyId;
         const parsedCompanyId = rawCompanyId && !isNaN(parseInt(rawCompanyId.toString(), 10))
@@ -172,6 +174,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                 rowCompanyId,
                 rowDbName,
                 rowCompanyName,
+                row,
             );
 
             await UserModel.update(
@@ -214,7 +217,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
 
         if (!currentEntry) {
             const fallbackToken = user.Autheticate_Id ?? generateToken();
-            storeTokenSession(fallbackToken, user.Global_User_ID, user.Local_User_ID, 0, '', '');
+            storeTokenSession(fallbackToken, user.Global_User_ID, user.Local_User_ID, 0, '', '', user);
             await UserModel.update(
                 { Autheticate_Id: fallbackToken },
                 { 
@@ -376,6 +379,7 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
                 companyConfig.id,
                 companyConfig.database,
                 companyConfig.name,
+                userAccess,
             );
 
             await UserModel.update(
@@ -637,12 +641,16 @@ export const changePassword = async (req: Request, res: Response): Promise<Respo
         // Hash the new password
         const hashedNewPassword = await hashPassword(newPassword);
 
+        // Ensure Password column supports at least 255 chars for bcrypt hash
+        try {
+            await sequelize.query(`ALTER TABLE tbl_Users ALTER COLUMN Password NVARCHAR(255)`);
+        } catch {
+            // Column may already be NVARCHAR(255)
+        }
+
         // Update the password for all entries under this UserName in default database
-        // Note: The default database's Password column is nvarchar(50), so we store it
-        // in plain text to avoid truncation of bcrypt hashes (which are 60 characters).
-        // The login controller verifies this field using verifyPasswordCombined, which supports direct comparison.
         await UserModel.update(
-            { Password: newPassword },
+            { Password: hashedNewPassword },
             {
                 where: {
                     Global_User_ID: user.Global_User_ID

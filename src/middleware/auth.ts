@@ -147,8 +147,8 @@ export const authenticate = async (
             }
         }
 
-        // UPDATED: Store token session with localUserId
-        storeTokenSession(token, user.Global_User_ID, localUserId, companyId, dbName, companyName);
+        // UPDATED: Store token session with localUserId and user
+        storeTokenSession(token, user.Global_User_ID, localUserId, companyId, dbName, companyName, user);
 
         req.user             = user;
         req.userId           = user.Global_User_ID;

@@ -1,6 +1,6 @@
 import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
 import { z } from 'zod';
-import { sequelize as defaultSequelize } from '../../../config/sequalizer';
+import { sequelize as defaultSequelize } from '../../../config/database.config';
 
 const modelName = 'Task_Paramet_DT';
 

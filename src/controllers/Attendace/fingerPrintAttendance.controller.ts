@@ -19,12 +19,38 @@ const formatDateToString = (date: Date): string => {
 const isValidDate = (dateStr: string): boolean =>
     !isNaN(new Date(dateStr).getTime());
 
+const getEmployeeForUser = async (
+    db: import('sequelize').Sequelize,
+    req: Request
+): Promise<{ Emp_Id: number; User_Mgt_Id: number; fingerPrintEmpId: string } | null> => {
+    const user = (req as any).user;
+    if (!user) return null;
+
+    const localUserId = (req as any).localUserId ?? user.Local_User_ID ?? null;
+    const globalUserId = (req as any).userId ?? user.Global_User_ID ?? null;
+    const userName = user.UserName ?? null;
+
+    const rows = await db.query<{ Emp_Id: number; User_Mgt_Id: number; fingerPrintEmpId: string }>(
+        `SELECT TOP 1 Emp_Id, User_Mgt_Id, fingerPrintEmpId 
+         FROM tbl_Employee_Master 
+         WHERE (:localUserId IS NOT NULL AND User_Mgt_Id = :localUserId)
+            OR (:globalUserId IS NOT NULL AND User_Mgt_Id = :globalUserId)
+            OR (:userName IS NOT NULL AND Mobile_No = :userName)`,
+        {
+            replacements: { localUserId, globalUserId, userName },
+            type: QueryTypes.SELECT,
+        }
+    );
+
+    return rows && rows.length > 0 ? rows[0] : null;
+};
+
 // ─── Public controllers ───────────────────────────────────────────────────────
 
 export const getFingerprintAttendance = async (req: Request, res: Response): Promise<Response> => {
     try {
         const { FromDate, ToDate, FingerPrintId, EmpId } = req.query;
-        const db = req.companyDB;
+        const db = (req as any).companyDB || req.companyDB;
 
         if (!db) return servError(new Error('Company database connection not found'), res);
 
@@ -39,16 +65,40 @@ export const getFingerprintAttendance = async (req: Request, res: Response): Pro
         adjustedToDate.setDate(adjustedToDate.getDate() + 1);
         const adjustedToDateStr = adjustedToDate.toISOString();
 
+        const user = (req as any).user;
+        const userTypeId = user?.UserTypeId ?? (req as any).userTypeId;
+        const isAdmin = userTypeId !== undefined && userTypeId !== null && (Number(userTypeId) === 0 || Number(userTypeId) === 1);
+
         let result: AttendanceResult[];
 
-        if (EmpId && EmpId !== '0' && EmpId !== 'ALL') {
-            result = await getSingleEmployeeAttendance(
-                db, FromDate as string, adjustedToDateStr, EmpId as string
-            );
+        if (!isAdmin) {
+            // Non-admin user: list ONLY this individual logged-in employee's data
+            const empRecord = await getEmployeeForUser(db, req);
+            if (!empRecord) {
+                return noData(res);
+            }
+            if (empRecord.fingerPrintEmpId && empRecord.fingerPrintEmpId !== '0') {
+                result = await getMultipleEmployeesAttendance(
+                    db, FromDate as string, adjustedToDateStr, empRecord.fingerPrintEmpId
+                );
+            } else if (empRecord.User_Mgt_Id) {
+                result = await getMultipleEmployeesAttendance(
+                    db, FromDate as string, adjustedToDateStr, undefined, empRecord.User_Mgt_Id
+                );
+            } else {
+                result = [];
+            }
         } else {
-            result = await getMultipleEmployeesAttendance(
-                db, FromDate as string, adjustedToDateStr, FingerPrintId as string | undefined
-            );
+            // Admin user: all data or query filters
+            if (EmpId && EmpId !== '0' && EmpId !== 'ALL') {
+                result = await getSingleEmployeeAttendance(
+                    db, FromDate as string, adjustedToDateStr, EmpId as string
+                );
+            } else {
+                result = await getMultipleEmployeesAttendance(
+                    db, FromDate as string, adjustedToDateStr, FingerPrintId as string | undefined
+                );
+            }
         }
 
         return result.length > 0 ? dataFound(res, result) : noData(res);
@@ -61,7 +111,7 @@ export const getFingerprintAttendance = async (req: Request, res: Response): Pro
 
 export const getTodayAttendance = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const db = req.companyDB;
+        const db = (req as any).companyDB || req.companyDB;
         if (!db) return servError(new Error('Company database connection not found'), res);
 
         const today    = formatDateToString(new Date());
@@ -69,7 +119,34 @@ export const getTodayAttendance = async (req: Request, res: Response): Promise<R
             new Date(new Date().setDate(new Date().getDate() + 1))
         );
 
-        const records = await getMultipleEmployeesAttendance(db, today, tomorrow);
+        const user = (req as any).user;
+        const userTypeId = user?.UserTypeId ?? (req as any).userTypeId;
+        const isAdmin = userTypeId !== undefined && userTypeId !== null && (Number(userTypeId) === 0 || Number(userTypeId) === 1);
+
+        let records: AttendanceResult[];
+
+        if (!isAdmin) {
+            // Non-admin user: list ONLY this individual logged-in employee's data
+            const empRecord = await getEmployeeForUser(db, req);
+            if (!empRecord) {
+                return dataFound(res, []);
+            }
+            if (empRecord.fingerPrintEmpId && empRecord.fingerPrintEmpId !== '0') {
+                records = await getMultipleEmployeesAttendance(
+                    db, today, tomorrow, empRecord.fingerPrintEmpId
+                );
+            } else if (empRecord.User_Mgt_Id) {
+                records = await getMultipleEmployeesAttendance(
+                    db, today, tomorrow, undefined, empRecord.User_Mgt_Id
+                );
+            } else {
+                records = [];
+            }
+        } else {
+            // Admin user: all employees
+            records = await getMultipleEmployeesAttendance(db, today, tomorrow);
+        }
+
         return dataFound(res, records);
 
     } catch (error) {
@@ -374,11 +451,16 @@ const getSingleEmployeeAttendance = async (
 ): Promise<AttendanceResult[]> => {
 
     const query = `
-        WITH RankedLogs AS (
+        WITH Numbers AS (
+            SELECT 0 AS n
+            UNION ALL
+            SELECT n + 1 FROM Numbers WHERE n < DATEDIFF(day, CAST(:FromDate AS DATE), CAST(:ToDate AS DATE))
+        ),
+        RankedLogs AS (
             SELECT
                 em.User_Mgt_Id,
                 COALESCE(u.Name, '') AS username,
-                u.isActive,
+                COALESCE(u.UDel_Flag, 0) AS UDel_Flag,
                 em.fingerPrintEmpId,
                 em.Sex AS Sex,
                 al.AttendanceDate AS LogDateTime,
@@ -392,13 +474,13 @@ const getSingleEmployeeAttendance = async (
                 ) AS record_count
             FROM tbl_Employee_Master em
             LEFT JOIN tbl_Users u
-                ON u.id = em.User_Mgt_Id
+                ON u.Global_User_ID = em.User_Mgt_Id
             LEFT JOIN etimetracklite1.dbo.Employees pd
-                ON CAST(pd.EmployeeCode AS NVARCHAR(50)) = em.fingerPrintEmpId
+                ON CAST(pd.EmployeeCode COLLATE DATABASE_DEFAULT AS NVARCHAR(50)) = em.fingerPrintEmpId COLLATE DATABASE_DEFAULT
             LEFT JOIN etimetracklite1.dbo.AttendanceLogs al
                 ON al.EmployeeId = pd.EmployeeId
             WHERE
-                COALESCE(u.isActive, 0) != 1
+                COALESCE(u.UDel_Flag, 0) = 0
                 AND al.status != 'Resigned'
                 AND al.AttendanceDate >= CAST(:FromDate AS DATETIME)
                 AND al.AttendanceDate < CAST(:ToDate AS DATETIME)
@@ -420,7 +502,7 @@ const getSingleEmployeeAttendance = async (
                 ) AS PunchDateTimes
             FROM tbl_Employee_Master em
             LEFT JOIN etimetracklite1.dbo.Employees pd
-                ON CAST(pd.EmployeeCode AS NVARCHAR(50)) = em.fingerPrintEmpId
+                ON CAST(pd.EmployeeCode COLLATE DATABASE_DEFAULT AS NVARCHAR(50)) = em.fingerPrintEmpId COLLATE DATABASE_DEFAULT
             LEFT JOIN etimetracklite1.dbo.AttendanceLogs al
                 ON al.EmployeeId = pd.EmployeeId
             WHERE
@@ -434,15 +516,12 @@ const getSingleEmployeeAttendance = async (
         LeaveDays AS (
             SELECT
                 lm.User_Id,
-                DATEADD(DAY, n.number, CAST(lm.FromDate AS DATE)) AS LeaveDate
+                DATEADD(DAY, n.n, CAST(lm.FromDate AS DATE)) AS LeaveDate
             FROM tbl_Leave_Master lm
-            CROSS JOIN (
-                SELECT number FROM master.dbo.spt_values
-                WHERE type = 'P' AND number BETWEEN 0 AND 1000
-            ) n
+            CROSS JOIN Numbers n
             WHERE
                 lm.Status = 'Approved'
-                AND DATEADD(DAY, n.number, CAST(lm.FromDate AS DATE)) <= CAST(lm.ToDate AS DATE)
+                AND DATEADD(DAY, n.n, CAST(lm.FromDate AS DATE)) <= CAST(lm.ToDate AS DATE)
         )
         SELECT
             e.User_Mgt_Id                       AS fingerPrintEmpId,
@@ -467,7 +546,7 @@ const getSingleEmployeeAttendance = async (
             END AS AttendanceStatus
         FROM tbl_Employee_Master e
         LEFT JOIN tbl_Employee_Designation d  ON e.Designation    = d.Designation_Id
-        LEFT JOIN tbl_Users                u  ON e.User_Mgt_Id    = u.id
+        LEFT JOIN tbl_Users                u  ON e.User_Mgt_Id    = u.Global_User_ID
         LEFT JOIN RankedLogs               rl ON e.User_Mgt_Id    = rl.User_Mgt_Id
         LEFT JOIN PunchDetails             ag ON ag.User_Mgt_Id   = rl.User_Mgt_Id
                                              AND ag.LogDate        = rl.LogDate
@@ -476,10 +555,11 @@ const getSingleEmployeeAttendance = async (
             AND rl.LogDate >= CAST(:FromDate AS DATETIME)
             AND rl.LogDate <  CAST(:ToDate   AS DATETIME)
             AND e.User_Mgt_Id = :EmpCode
-            AND COALESCE(u.isActive, 0) != 1
+            AND COALESCE(u.UDel_Flag, 0) = 0
         GROUP BY
             e.User_Mgt_Id, d.Designation, rl.username, rl.Sex, rl.LogDate, ag.PunchDateTimes
         ORDER BY rl.LogDate DESC
+        OPTION (MAXRECURSION 1000)
     `;
 
     return db.query<AttendanceResult>(query, {
@@ -493,28 +573,35 @@ const getMultipleEmployeesAttendance = async (
     FromDate:      string,
     ToDate:        string,
     FingerPrintId?: string,
+    UserMgtId?:    number | string,
 ): Promise<AttendanceResult[]> => {
 
-    const filterCondition =
-        !FingerPrintId || FingerPrintId === 'ALL' || FingerPrintId === '0'
-            ? ''
-            : "AND em.fingerPrintEmpId = :FingerPrintId";
+    let filterCondition = '';
+    let punchFilterCondition = '';
 
-    const punchFilterCondition =
-        !FingerPrintId || FingerPrintId === 'ALL' || FingerPrintId === '0'
-            ? ''
-            : "AND pd.EmployeeCode = :FingerPrintId";
+    if (FingerPrintId && FingerPrintId !== 'ALL' && FingerPrintId !== '0') {
+        filterCondition = "AND em.fingerPrintEmpId = :FingerPrintId";
+        punchFilterCondition = "AND pd.EmployeeCode = :FingerPrintId";
+    } else if (UserMgtId) {
+        filterCondition = "AND em.User_Mgt_Id = :UserMgtId";
+        punchFilterCondition = "AND pd.EmployeeCode IN (SELECT fingerPrintEmpId COLLATE DATABASE_DEFAULT FROM tbl_Employee_Master WHERE User_Mgt_Id = :UserMgtId)";
+    }
 
     const query = `
- WITH RankedLogs AS (
+        WITH Numbers AS (
+            SELECT 0 AS n
+            UNION ALL
+            SELECT n + 1 FROM Numbers WHERE n < DATEDIFF(day, CAST(:FromDate AS DATE), CAST(:ToDate AS DATE))
+        ),
+        RankedLogs AS (
                 SELECT
                      em.fingerPrintEmpId,
                      em.User_Mgt_Id,
                      em.Emp_Name AS username,
                      em.Sex AS Sex,
                      pd.EmployeeCode,
-                   pd.EmployeeId,
-                  al.AttendanceDate AS LogDateTime,
+                    pd.EmployeeId,
+                   al.AttendanceDate AS LogDateTime,
                     CAST(al.AttendanceDate AS DATE) AS LogDate,
                    ROW_NUMBER() OVER (
                          PARTITION BY em.fingerPrintEmpId, CAST(al.AttendanceDate AS DATE)
@@ -562,15 +649,12 @@ const getMultipleEmployeesAttendance = async (
         LeaveDays AS (
             SELECT
                 lm.User_Id,
-                DATEADD(DAY, n.number, CAST(lm.FromDate AS DATE)) AS LeaveDate
+                DATEADD(DAY, n.n, CAST(lm.FromDate AS DATE)) AS LeaveDate
             FROM tbl_Leave_Master lm
-            CROSS JOIN (
-                SELECT number FROM master.dbo.spt_values
-                WHERE type = 'P' AND number BETWEEN 0 AND 1000
-            ) n
+            CROSS JOIN Numbers n
             WHERE
                 lm.Status = 'Approved'
-                AND DATEADD(DAY, n.number, CAST(lm.FromDate AS DATE)) <= CAST(lm.ToDate AS DATE)
+                AND DATEADD(DAY, n.n, CAST(lm.FromDate AS DATE)) <= CAST(lm.ToDate AS DATE)
         )
         SELECT
             em.fingerPrintEmpId,
@@ -595,7 +679,7 @@ const getMultipleEmployeesAttendance = async (
             END AS AttendanceStatus
         FROM tbl_Employee_Master em
         LEFT JOIN tbl_Employee_Designation d  ON em.Designation      = d.Designation_Id
-        LEFT JOIN RankedLogs               rl ON em.fingerPrintEmpId  = rl.fingerPrintEmpId
+        LEFT JOIN RankedLogs               rl ON em.fingerPrintEmpId  = rl.fingerPrintEmpId AND em.User_Mgt_Id = rl.User_Mgt_Id
         LEFT JOIN PunchDetails             ag ON ag.EmployeeCode      = rl.EmployeeCode
                                              AND ag.LogDate            = rl.LogDate
         WHERE
@@ -606,11 +690,15 @@ const getMultipleEmployeesAttendance = async (
             em.fingerPrintEmpId, d.Designation, rl.username, rl.Sex,
             rl.LogDate, ag.PunchDateTimes, rl.User_Mgt_Id
         ORDER BY rl.LogDate DESC
+        OPTION (MAXRECURSION 1000)
     `;
 
     const replacements: Record<string, unknown> = { FromDate, ToDate };
     if (FingerPrintId && FingerPrintId !== 'ALL' && FingerPrintId !== '0') {
         replacements.FingerPrintId = FingerPrintId;
+    }
+    if (UserMgtId) {
+        replacements.UserMgtId = UserMgtId;
     }
 
     return db.query<AttendanceResult>(query, {

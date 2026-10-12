@@ -1,6 +1,6 @@
 // models/masters/employee involved/type.model.ts
 import { DataTypes, Model, Optional } from 'sequelize';
-import { sequelize } from '../../../config/sequalizer';
+import { sequelize } from '../../../config/database.config';
 import { z } from 'zod';
 import Project from '../project/type.model';
 import Employee from '../employee/type.model';

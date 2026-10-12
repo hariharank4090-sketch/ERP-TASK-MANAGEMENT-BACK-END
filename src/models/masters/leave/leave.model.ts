@@ -245,6 +245,6 @@ export function initLeaveModel(sequelize: Sequelize): typeof Leave {
 }
 
 // ─── Default Export ───────────────────────────────────────────────────────────
-import { sequelize as defaultSequelize } from '../../../config/sequalizer';
+import { sequelize as defaultSequelize } from '../../../config/database.config';
 export const LeaveModel = initLeaveModel(defaultSequelize);
 export default LeaveModel;

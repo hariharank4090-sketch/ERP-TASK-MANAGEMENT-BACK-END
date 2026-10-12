@@ -18,7 +18,7 @@
 //     CompanyQueryParams
 // } from '../../../models/masters/companyMaster/type.model';
 // import { ZodError } from 'zod';
-// import { getCurrentSequelize, getCurrentDatabaseName } from '../../../config/sequalizer';
+// import { getCurrentSequelize, getCurrentDatabaseName } from '../../../config/database.config';
 
 // const validateWithZod = <T>(schema: any, data: any): {
 //     success: boolean;

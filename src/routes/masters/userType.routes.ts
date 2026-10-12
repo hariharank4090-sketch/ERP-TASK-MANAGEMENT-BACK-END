@@ -8,8 +8,7 @@ import {
     deleteUserType,
     getMyRole,
 } from '../../controllers/masters/taskManagement/userType.controller';
-import { authenticate, authorize }              from '../../middleware/auth';
-import { setCompanyDatabase, requireCompanyDB } from '../../middleware/database.middleware';
+import { authenticate, authorize } from '../../middleware/auth';
 
 const router = Router();
 
@@ -61,8 +60,6 @@ const router = Router();
 router.get('/my-role',
     authenticate,
     authorize([]),          // any authenticated user
-    setCompanyDatabase,
-    requireCompanyDB,
     getMyRole,
 );
 
@@ -70,8 +67,6 @@ router.get('/my-role',
 router.get('/',
     authenticate,
     authorize([]),          // any authenticated user
-    setCompanyDatabase,
-    requireCompanyDB,
     getAllUserTypes,
 );
 
@@ -79,8 +74,6 @@ router.get('/',
 router.get('/:id',
     authenticate,
     authorize([]),          // any authenticated user
-    setCompanyDatabase,
-    requireCompanyDB,
     getUserTypeById,
 );
 
@@ -90,9 +83,7 @@ router.get('/:id',
 // POST /api/masters/user-type
 router.post('/',
     authenticate,
-   authorize([]),         // only Admin (UserTypeId = 1)
-    setCompanyDatabase,
-    requireCompanyDB,
+    authorize([]),         // only Admin (UserTypeId = 1)
     createUserType,
 );
 
@@ -100,17 +91,13 @@ router.post('/',
 router.put('/:id',
     authenticate,
     authorize([]),         // only Admin (UserTypeId = 1)
-    setCompanyDatabase,
-    requireCompanyDB,
     updateUserType,
 );
 
 // DELETE /api/masters/user-type/:id  (soft delete)
 router.delete('/:id',
     authenticate,
-   authorize([]),         // only Admin (UserTypeId = 1)
-    setCompanyDatabase,
-    requireCompanyDB,
+    authorize([]),         // only Admin (UserTypeId = 1)
     deleteUserType,
 );
 

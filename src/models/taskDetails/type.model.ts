@@ -284,6 +284,6 @@ export const taskDetailIdSchema = z.object({
 });
 
 // Default export for backward compatibility
-import { getDefaultConnection } from '../../config/sequalizer';
+import { getDefaultConnection } from '../../config/database.config';
 const defaultTaskDetailModel = initTaskDetailModel(getDefaultConnection());
 export default defaultTaskDetailModel;

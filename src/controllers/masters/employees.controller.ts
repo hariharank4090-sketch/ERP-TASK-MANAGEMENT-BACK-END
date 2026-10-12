@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { sequelize } from '../../config/sequalizer';
+import { sequelize } from '../../config/database.config';
 import { QueryTypes } from 'sequelize';
 
 // Get employees by project ID from tbl_Project_Employee

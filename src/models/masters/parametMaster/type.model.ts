@@ -176,6 +176,6 @@ export function initParamMasterModel(sequelize: Sequelize): typeof ParamMaster {
 }
 
 // Default export for backward compatibility
-import { sequelize as defaultSequelize } from '../../../config/sequalizer';
+import { sequelize as defaultSequelize } from '../../../config/database.config';
 export const ParamMasterModel = initParamMasterModel(defaultSequelize);
 export default ParamMasterModel;

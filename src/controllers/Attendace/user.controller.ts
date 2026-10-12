@@ -180,7 +180,7 @@ const getSequelizeFromRequest = (req: Request): Sequelize => {
     
     // Fallback to default connection
     console.log(`⚠️ No companyDB in request, using default connection`);
-    const { getDefaultConnection } = require('../../../config/sequalizer');
+    const { getDefaultConnection } = require('../../config/database.config');
     return getDefaultConnection();
 };
 

@@ -65,6 +65,11 @@ export const setCompanyDatabase = async (
             req.localUserId = session.localUserId; // ADDED: Get localUserId from session
             req.currentDBName = session.dbName;
             req.currentCompanyId = session.companyId;
+            req.user = session.user || ({
+                Global_User_ID: session.userId,
+                Local_User_ID: session.localUserId,
+                Company_Id: session.companyId,
+            } as any);
 
             try {
                 const dbConnection = await getUserDatabaseConnectionFromToken(token);
@@ -130,7 +135,7 @@ export const setCompanyDatabase = async (
 
         // Store session for future requests
         if (dbName && companyId) {
-            storeTokenSession(token, user.Global_User_ID, localUserId, companyId, dbName, companyName || ''); // UPDATED: Added localUserId parameter
+            storeTokenSession(token, user.Global_User_ID, localUserId, companyId, dbName, companyName || '', user); // UPDATED: Added localUserId and user parameter
             console.log(`📝 New session stored for user ${user.UserName}, company ${companyId}, LocalUser ${localUserId}`);
         }
 

@@ -22,7 +22,7 @@ const getCostCenter = async (req: Request, res: Response) => {
             LEFT JOIN tbl_ERP_Cost_Category AS cc
                 ON cc.Cost_Category_Id = c.User_Type
             LEFT JOIN tbl_Users AS u
-                ON u.UserId = c.User_Id
+                ON u.Global_User_ID = c.User_Id
             LEFT JOIN tbl_Employee_Master AS em
                 ON em.Emp_Id = c.Is_Converted_To_User;
         `, { type: QueryTypes.SELECT }) as any[];
@@ -59,7 +59,7 @@ const createCostCenter = async (req: Request, res: Response) => {
 
         if (finalUserId !== 0) {
             await db.query(`
-                UPDATE tbl_Users SET UserTypeId=:User_Type WHERE UserId=:User_Id
+                UPDATE tbl_Users SET UserTypeId=:User_Type WHERE Global_User_ID=:User_Id
             `, {
                 replacements: { User_Type, User_Id: finalUserId },
                 type: QueryTypes.UPDATE
@@ -316,7 +316,7 @@ const costCenterInvolvedReports = async (req: Request, res: Response) => {
                 LEFT JOIN tbl_ERP_Cost_Category AS cc
                 ON cc.Cost_Category_Id = STE.Staff_Type_Id 
                 LEFT JOIN tbl_Users AS u
-                ON u.UserId = c.User_Id
+                ON u.Global_User_ID = c.User_Id
                 LEFT JOIN DESTINATION AS d
                 ON d.STJ_Id = STE.STJ_Id
                 WHERE STE.STJ_Id IN (SELECT STJ_Id FROM STOCKJOURNAL)
@@ -338,7 +338,7 @@ const costCenterInvolvedReports = async (req: Request, res: Response) => {
                 LEFT JOIN tbl_ERP_Cost_Category AS cc
                 ON cc.Cost_Category_Id = te.Cost_Center_Type_Id 
                 LEFT JOIN tbl_Users AS u
-                ON u.UserId = c.User_Id
+                ON u.Global_User_ID = c.User_Id
                 LEFT JOIN TRIP_DETAILS AS td
                 ON te.Trip_Id = td.Trip_Id
                 WHERE te.Trip_Id IN (SELECT Trip_Id FROM TRIP_DETAILS)
@@ -392,7 +392,7 @@ const costCenterEmployeeReports = async (req: Request, res: Response) => {
                     u.Name AS ERPName
                 FROM tbl_ERP_Cost_Center AS c
                 LEFT JOIN tbl_ERP_Cost_Category AS cc ON cc.Cost_Category_Id = c.User_Type
-                LEFT JOIN tbl_Users AS u ON u.UserId = c.User_Id
+                LEFT JOIN tbl_Users AS u ON u.Global_User_ID = c.User_Id
                 WHERE c.User_Id = :user
             ), STOCKJOURNAL AS (
                 SELECT 

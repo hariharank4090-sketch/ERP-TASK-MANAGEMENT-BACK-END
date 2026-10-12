@@ -1,5 +1,5 @@
 import { DataTypes, Model, Optional } from 'sequelize';
-import { sequelize } from '../../../config/sequalizer';
+import { sequelize } from '../../../config/database.config';
 
 // ─── Result Interfaces ────────────────────────────────────────────────────────
 

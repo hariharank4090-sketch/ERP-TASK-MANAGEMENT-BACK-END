@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { ZodError } from 'zod';
 import {
     created,
@@ -78,15 +78,19 @@ const setupTaskAssociations = (req: Request) => {
     const Task = initTaskModel(sequelize);
     const ProjectSchedule = initProjectScheduleModel(sequelize);
     
-    Task.hasMany(ProjectSchedule, {
-        foreignKey: 'Task_Id',
-        as: 'Schedules'
-    });
+    if (!Task.associations.Schedules) {
+        Task.hasMany(ProjectSchedule, {
+            foreignKey: 'Task_Id',
+            as: 'Schedules'
+        });
+    }
     
-    ProjectSchedule.belongsTo(Task, {
-        foreignKey: 'Task_Id',
-        as: 'Task'
-    });
+    if (!ProjectSchedule.associations.Task) {
+        ProjectSchedule.belongsTo(Task, {
+            foreignKey: 'Task_Id',
+            as: 'Task'
+        });
+    }
     
     return { Task, ProjectSchedule };
 };
@@ -871,17 +875,27 @@ export const deleteTask = async (req: Request, res: Response) => {
             return handleForbiddenError(res, 'You do not have permission to delete this task');
         }
 
-        const db = (req as any).companyDB;
-        if (db) {
-            // Delete dependencies to avoid foreign key / relation conflicts and ensure successful deletion
-            await db.query('DELETE FROM tbl_Task_Details WHERE Task_Id = ?', { replacements: [id] });
-            await db.query('DELETE FROM tbl_Task_Paramet_DT WHERE Task_Id = ?', { replacements: [id] });
-            await db.query('DELETE FROM tbl_Project_Schedule WHERE Task_Id = ?', { replacements: [id] });
-            await db.query('DELETE FROM tbl_Work_Paramet_DT WHERE Task_Id = ?', { replacements: [id] });
-            await db.query('DELETE FROM tbl_Work_Master WHERE Task_Id = ?', { replacements: [id] });
+        const db = (req as any).companyDB || (req as any).db || Task.sequelize;
+        if (!db) {
+            return servError(new Error('Database connection not available'), res);
         }
 
-        await task.destroy();
+        // Check if active project schedules exist
+        const activeSchedules = await db.query(
+            `SELECT TOP 1 Sch_Id FROM tbl_Project_Schedule WHERE Task_Id = :id AND Sch_Del_Flag = 0`,
+            { replacements: { id }, type: QueryTypes.SELECT }
+        ) as any[];
+
+        if (activeSchedules && activeSchedules.length > 0) {
+            return res.status(409).json({
+                success: false,
+                message: 'Cannot delete task: active project schedules exist for this task'
+            });
+        }
+
+        await db.transaction(async (t: any) => {
+            await task.destroy({ transaction: t });
+        });
         
         return res.status(200).json({
             success: true,

@@ -23,6 +23,7 @@ export interface TokenSession {
     dbName: string;
     companyName: string;
     createdAt: Date;
+    user?: any;
 }
 
 let defaultConnection: Sequelize | null = null;
@@ -109,8 +110,11 @@ export const getDefaultConnection = (): Sequelize => {
                 ],
                 max: 3
             },
-            isolationLevel: Transaction.ISOLATION_LEVELS.READ_UNCOMMITTED,
+            isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED,
         });
+
+        // Background session table initialization
+        syncDatabaseSessions().catch(() => {});
     }
     return defaultConnection;
 };
@@ -152,7 +156,15 @@ const companyConfigsByDBName: Map<string, CompanyDBConfig> = new Map();
 
 function loadCompanyConfigurations(): void {
     console.log('📂 Loading company configurations from .env...');
-    for (let i = 1; i <= 10; i++) {
+    const companyIndices = new Set<number>();
+    for (const key of Object.keys(process.env)) {
+        const match = key.match(/^COMPANY(\d+)_/);
+        if (match) {
+            companyIndices.add(parseInt(match[1], 10));
+        }
+    }
+    const sortedIndices = Array.from(companyIndices).sort((a, b) => a - b);
+    for (const i of sortedIndices) {
         const dbName = process.env[`COMPANY${i}_DATABASE`];
         const dbHost = process.env[`COMPANY${i}_DB_HOST`];
         const dbUser = process.env[`COMPANY${i}_DB_USER`];
@@ -183,6 +195,58 @@ loadCompanyConfigurations();
 const companyConnections: Map<string, Sequelize> = new Map();
 export const tokenSessions: Map<string, TokenSession> = new Map();
 const userCompanyTokens: Map<number, Map<number, string>> = new Map();
+
+
+
+export async function syncDatabaseSessions(): Promise<void> {
+    try {
+        const db = defaultConnection || getDefaultConnection();
+        await db.query(`
+            IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='tbl_User_Sessions' AND xtype='U')
+            CREATE TABLE tbl_User_Sessions (
+                Token NVARCHAR(500) PRIMARY KEY,
+                UserId BIGINT,
+                LocalUserId BIGINT NULL,
+                CompanyId INT,
+                DbName NVARCHAR(100),
+                CompanyName NVARCHAR(200),
+                CreatedAt DATETIME,
+                ExpiresAt DATETIME,
+                UserData NVARCHAR(MAX) NULL
+            )
+        `);
+        const [dbSessions] = await db.query(
+            `SELECT * FROM tbl_User_Sessions WHERE ExpiresAt > GETDATE()`
+        ) as any[];
+        if (Array.isArray(dbSessions)) {
+            for (const row of dbSessions) {
+                if (!tokenSessions.has(row.Token)) {
+                    let userObj = undefined;
+                    try { if (row.UserData) userObj = JSON.parse(row.UserData); } catch {}
+                    const sessionItem: TokenSession = {
+                        token: row.Token,
+                        userId: Number(row.UserId),
+                        localUserId: row.LocalUserId ? Number(row.LocalUserId) : null,
+                        companyId: Number(row.CompanyId),
+                        dbName: row.DbName,
+                        companyName: row.CompanyName,
+                        createdAt: new Date(row.CreatedAt),
+                        user: userObj,
+                    };
+                    tokenSessions.set(row.Token, sessionItem);
+                    if (!userCompanyTokens.has(sessionItem.userId)) {
+                        userCompanyTokens.set(sessionItem.userId, new Map());
+                    }
+                    userCompanyTokens.get(sessionItem.userId)!.set(sessionItem.companyId, sessionItem.token);
+                }
+            }
+        }
+    } catch {
+        // Fallback silently if table creation/query fails
+    }
+}
+
+
 
 export function getCompanyConfig(companyId: number): CompanyDBConfig | null {
     return companyConfigs.get(companyId) ?? null;
@@ -255,7 +319,7 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
             ],
             max: 3
         },
-        isolationLevel: Transaction.ISOLATION_LEVELS.READ_UNCOMMITTED,
+        isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED,
     });
     try {
         await seq.authenticate();
@@ -303,7 +367,7 @@ export function getLocalUserIdFromToken(token: string): number | null {
     return tokenSessions.get(token)?.localUserId ?? null;
 }
 
-// UPDATED: Added localUserId parameter
+// UPDATED: Added localUserId and optional user parameter
 export function storeTokenSession(
     token: string,
     userId: number,
@@ -311,18 +375,47 @@ export function storeTokenSession(
     companyId: number,
     dbName: string,
     companyName: string,
+    user?: any,
 ): void {
-    tokenSessions.set(token, { 
+    const sessionObj: TokenSession = { 
         token, 
         userId, 
         localUserId,  // ADDED field
         companyId, 
         dbName, 
         companyName, 
-        createdAt: new Date() 
-    });
+        createdAt: new Date(),
+        user
+    };
+    tokenSessions.set(token, sessionObj);
     if (!userCompanyTokens.has(userId)) userCompanyTokens.set(userId, new Map());
     userCompanyTokens.get(userId)!.set(companyId, token);
+
+    try {
+        if (defaultConnection) {
+            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            defaultConnection.query(`
+                IF EXISTS (SELECT 1 FROM tbl_User_Sessions WHERE Token = :token)
+                    UPDATE tbl_User_Sessions SET UserId = :userId, LocalUserId = :localUserId, CompanyId = :companyId, DbName = :dbName, CompanyName = :companyName, CreatedAt = :createdAt, ExpiresAt = :expiresAt, UserData = :userData WHERE Token = :token
+                ELSE
+                    INSERT INTO tbl_User_Sessions (Token, UserId, LocalUserId, CompanyId, DbName, CompanyName, CreatedAt, ExpiresAt, UserData)
+                    VALUES (:token, :userId, :localUserId, :companyId, :dbName, :companyName, :createdAt, :expiresAt, :userData)
+            `, {
+                replacements: {
+                    token,
+                    userId,
+                    localUserId: localUserId || null,
+                    companyId,
+                    dbName,
+                    companyName,
+                    createdAt: sessionObj.createdAt,
+                    expiresAt,
+                    userData: user ? JSON.stringify(user) : null,
+                }
+            }).catch(() => {});
+        }
+    } catch {}
+
     console.log(`📝 Session stored — User: ${userId}, LocalUser: ${localUserId}, Company: ${companyId} (${companyName}), DB: ${dbName}`);
 }
 
@@ -331,7 +424,7 @@ export function verifyTokenSession(token: string): TokenSession | null {
     if (!s) return null;
     const hoursSinceCreation = (Date.now() - s.createdAt.getTime()) / (1000 * 60 * 60);
     if (hoursSinceCreation > 24) {
-        tokenSessions.delete(token);
+        removeTokenSession(token);
         console.log('⏰ Session expired');
         return null;
     }
@@ -351,6 +444,13 @@ export function removeTokenSession(token: string): void {
         if (map.size === 0) userCompanyTokens.delete(s.userId);
     }
     tokenSessions.delete(token);
+
+    try {
+        if (defaultConnection) {
+            defaultConnection.query(`DELETE FROM tbl_User_Sessions WHERE Token = :token`, { replacements: { token } }).catch(() => {});
+        }
+    } catch {}
+
     console.log('🗑️ Session removed');
 }
 

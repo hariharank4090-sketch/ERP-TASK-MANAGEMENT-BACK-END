@@ -96,10 +96,11 @@ export const getAllTicketTasks = async (req: Request, res: Response) => {
         const whereClause: any = {};
         
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id || user?.currentCompanyId;
+        if (currentCompanyId) {
             whereClause[Op.or] = [
-                { From_CompanyId: user.currentCompanyId },
-                { To_CompanyId: user.currentCompanyId }
+                { From_CompanyId: currentCompanyId },
+                { To_CompanyId: currentCompanyId }
             ];
         }
 
@@ -149,8 +150,9 @@ export const getTicketTaskById = async (req: Request, res: Response) => {
         }
 
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
-            if (ticketTask.From_CompanyId !== user.currentCompanyId && ticketTask.To_CompanyId !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id || user?.currentCompanyId;
+        if (currentCompanyId) {
+            if (ticketTask.From_CompanyId !== currentCompanyId && ticketTask.To_CompanyId !== currentCompanyId) {
                 return handleForbiddenError(res, 'You do not have permission to access this ticket task');
             }
         }
@@ -188,9 +190,9 @@ export const createTicketTask = async (req: Request, res: Response) => {
 
         const data = validation.data!;
         const user = (req as any).user;
-        
-        if (user && user.currentCompanyId && !data.From_CompanyId) {
-            data.From_CompanyId = user.currentCompanyId;
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id || user?.currentCompanyId;
+        if (currentCompanyId && !data.From_CompanyId) {
+            data.From_CompanyId = currentCompanyId;
         }
 
         const TicketTaskModel = getTicketTaskModel(req);
@@ -236,8 +238,9 @@ export const updateTicketTask = async (req: Request, res: Response) => {
         }
 
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
-            if (existing.From_CompanyId !== user.currentCompanyId && existing.To_CompanyId !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id || user?.currentCompanyId;
+        if (currentCompanyId) {
+            if (existing.From_CompanyId !== currentCompanyId && existing.To_CompanyId !== currentCompanyId) {
                 await transaction.rollback();
                 return handleForbiddenError(res, 'You do not have permission to modify this ticket task');
             }
@@ -292,8 +295,9 @@ export const deleteTicketTask = async (req: Request, res: Response) => {
         }
 
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
-            if (existing.From_CompanyId !== user.currentCompanyId && existing.To_CompanyId !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id || user?.currentCompanyId;
+        if (currentCompanyId) {
+            if (existing.From_CompanyId !== currentCompanyId && existing.To_CompanyId !== currentCompanyId) {
                 await transaction.rollback();
                 return handleForbiddenError(res, 'You do not have permission to delete this ticket task');
             }

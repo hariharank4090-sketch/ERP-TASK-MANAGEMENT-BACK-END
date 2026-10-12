@@ -101,8 +101,8 @@ export const getUserTypeByAuth = async (authToken: string, req?: Request): Promi
             (req as any).userTypeId = user.UserTypeId;
         }
 
-        // If UserTypeId is directly in tbl_Users, return it
-        if (user.UserTypeId && user.UserTypeId > 0) {
+        // If UserTypeId is directly in tbl_Users, return it (allowing 0 for Super Admin)
+        if (user.UserTypeId !== null && user.UserTypeId !== undefined && user.UserTypeId >= 0) {
             console.log(`✅ UserTypeId from User Portal: ${user.UserTypeId}`);
             return Number(user.UserTypeId);
         }
@@ -162,7 +162,7 @@ export const getUserType = async (GlobalUserId: number, req?: Request): Promise<
                 WHERE Global_User_ID = @GlobalUserId AND UDel_Flag = 0
             `);
 
-        if (result.recordset.length > 0 && result.recordset[0].UserTypeId) {
+        if (result.recordset.length > 0 && result.recordset[0].UserTypeId !== null && result.recordset[0].UserTypeId !== undefined) {
             return Number(result.recordset[0].UserTypeId);
         }
         return false;

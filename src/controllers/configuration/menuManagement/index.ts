@@ -99,8 +99,16 @@ const companyRawConfigs: Map<number, CompanyRawConfig> = new Map();
 const loadRawCompanyConfigurations = (): void => {
     console.log('📂 Loading raw company configurations from .env...');
 
-    for (let i = 1; i <= 10; i++) {
-        const companyId = parseInt(process.env[`COMPANY${i}_ID`] ?? '0', 10);
+    const companyIndices = new Set<number>();
+    for (const key of Object.keys(process.env)) {
+        const match = key.match(/^COMPANY(\d+)_/);
+        if (match) {
+            companyIndices.add(parseInt(match[1], 10));
+        }
+    }
+    const sortedIndices = Array.from(companyIndices).sort((a, b) => a - b);
+    for (const i of sortedIndices) {
+        const companyId = parseInt(process.env[`COMPANY${i}_ID`] ?? `${i}`, 10);
         const dbName = process.env[`COMPANY${i}_DATABASE`];
         const dbHost = process.env[`COMPANY${i}_DB_HOST`];
         const dbUser = process.env[`COMPANY${i}_DB_USER`];

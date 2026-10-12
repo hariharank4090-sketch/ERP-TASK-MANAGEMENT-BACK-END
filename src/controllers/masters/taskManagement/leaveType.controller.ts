@@ -85,11 +85,11 @@ const validateWithZod = <T>(schema: any, data: any) => {
                 success: false,
                 errors: err.issues.map(e => ({
                     field: e.path.join('.') || 'unknown',
-                    message: 'Internal server error'
+                    message: e.message || 'Validation error'
                 }))
             };
         }
-        return { success: false };
+        return { success: false, errors: [{ field: 'unknown', message: 'Validation failed' }] };
     }
 };
 
@@ -103,7 +103,7 @@ const getSequelizeFromRequest = (req: Request): Sequelize => {
     
     // Fallback to default connection
     console.log(`⚠️ No companyDB in request, using default connection`);
-    const { getDefaultConnection } = require('../../../config/sequalizer');
+    const { getDefaultConnection } = require('../../../config/database.config');
     return getDefaultConnection();
 };
 
