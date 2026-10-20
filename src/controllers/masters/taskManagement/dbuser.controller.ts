@@ -18,7 +18,7 @@ const validateWithZod = <T>(schema: any, data: any) => {
                 success: false,
                 errors: err.issues.map(e => ({
                     field: e.path.join('.') || 'unknown',
-                    message: 'Internal server error'
+                    message: e.message || 'Validation error'
                 }))
             };
         }
@@ -44,8 +44,6 @@ const getUserModel = (req: Request): typeof User => {
     const sequelizeInstance = getCurrentSequelize(req);
     const dbName = getCurrentDatabaseName(req);
     
-    console.log(`\n📊 Using database: ${dbName} for User operations`);
-    console.log(`🔗 Sequelize instance: ${sequelizeInstance.config.database}`);
     
     // Initialize User model with current sequelize instance
     return User.initialize(sequelizeInstance);

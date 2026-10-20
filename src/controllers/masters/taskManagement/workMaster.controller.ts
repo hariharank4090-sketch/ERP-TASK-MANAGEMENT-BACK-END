@@ -283,7 +283,7 @@ export const getWorkById = async (req: Request, res: Response) => {
 
 const getNextWorkId = async (sequelizeInstance: Sequelize, transaction: Transaction): Promise<number> => {
     const result = await sequelizeInstance.query(
-        `SELECT ISNULL(MAX(Work_Id), 0) + 1 as NextWorkId FROM tbl_Work_Master`,
+        `SELECT ISNULL(MAX(Work_Id), 0) + 1 as NextWorkId FROM tbl_Work_Master WITH (UPDLOCK, HOLDLOCK)`,
         { type: QueryTypes.SELECT, transaction }
     ) as any[];
     return result[0].NextWorkId;
@@ -476,7 +476,7 @@ export const createWork = async (req: Request, res: Response) => {
         if ((scheduleResult as any[]).length > 0) {
             scheduleExists = true;
         } else {
-            const USER_PORTAL_DB = process.env.USERPORTALDB || "User_Portal";
+            const USER_PORTAL_DB = process.env.DATABASE || "User_Portal";
             const ticketAllocResult = await sequelizeInstance.query(
                 `SELECT T_Sch_Id FROM [${USER_PORTAL_DB}].[dbo].[tbl_Ticket_Alloctation] WHERE T_Sch_Id = :schId`,
                 { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }
@@ -619,7 +619,7 @@ export const updateWork = async (req: Request, res: Response) => {
             if (sr.length > 0) {
                 scheduleExists = true;
             } else {
-                const USER_PORTAL_DB = process.env.USERPORTALDB || "User_Portal";
+                const USER_PORTAL_DB = process.env.DATABASE || "User_Portal";
                 const ticketAllocResult = await sequelizeInstance.query(
                     `SELECT T_Sch_Id FROM [${USER_PORTAL_DB}].[dbo].[tbl_Ticket_Alloctation] WHERE T_Sch_Id = :schId`,
                     { replacements: { schId: data.Sch_Id }, type: QueryTypes.SELECT, transaction }

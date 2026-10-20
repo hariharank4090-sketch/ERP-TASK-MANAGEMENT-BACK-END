@@ -9,7 +9,6 @@ const dest = path.join(__dirname, 'frontend');
     try {
         await fs.remove(dest);
         await fs.copy(src, dest);
-        console.log('✅ Imported build from ERP_Frontend/dist');
     } catch (err) {
         console.error('❌ Failed to import:', err);
     }

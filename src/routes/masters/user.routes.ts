@@ -9,7 +9,7 @@ import {
     getUsersByType,
     testConnection
 } from '../../controllers/masters/taskManagement/dbuser.controller';
-import { setCompanyDatabase } from '../../middleware/database.middleware';
+import { setCompanyDatabase } from '../../middleware/companyDb.middleware';
 
 const router = express.Router();
 

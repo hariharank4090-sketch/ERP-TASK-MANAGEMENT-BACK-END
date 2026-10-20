@@ -174,8 +174,9 @@ export const getAllTasks = async (req: Request, res: Response) => {
         
         // Add company filter if user has company restriction
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
-            whereClause.Company_Id = user.currentCompanyId;
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId) {
+            whereClause.Company_Id = currentCompanyId;
         } else if (Company_Id !== undefined && Company_Id !== null) {
             whereClause.Company_Id = Company_Id;
         }
@@ -286,7 +287,8 @@ export const getTaskById = async (req: Request, res: Response) => {
         
         // Check if user has access to this task's company
         const user = (req as any).user;
-        if (user && user.currentCompanyId && task.Company_Id !== null && task.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && task.Company_Id !== null && task.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to access this task');
         }
 
@@ -391,7 +393,8 @@ export const getTasksByCompany = async (req: Request, res: Response) => {
         
         // Check if user has access to this company
         const user = (req as any).user;
-        if (user && user.currentCompanyId && parseInt(companyId) !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && parseInt(companyId) !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to view tasks for this company');
         }
 
@@ -630,7 +633,8 @@ export const getTaskSchedules = async (req: Request, res: Response) => {
         
         // Check if user has access to this task's company
         const user = (req as any).user;
-        if (user && user.currentCompanyId && task.Company_Id !== null && task.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && task.Company_Id !== null && task.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to view schedules for this task');
         }
 
@@ -775,7 +779,8 @@ export const updateTask = async (req: Request, res: Response) => {
         
         // Check if user has access to this task's company
         const user = (req as any).user;
-        if (user && user.currentCompanyId && task.Company_Id !== null && task.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && task.Company_Id !== null && task.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to update this task');
         }
 
@@ -871,7 +876,8 @@ export const deleteTask = async (req: Request, res: Response) => {
         
         // Check if user has access to this task's company
         const user = (req as any).user;
-        if (user && user.currentCompanyId && task.Company_Id !== null && task.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && task.Company_Id !== null && task.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to delete this task');
         }
 

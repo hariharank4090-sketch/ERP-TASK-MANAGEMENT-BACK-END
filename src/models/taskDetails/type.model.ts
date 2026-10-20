@@ -282,8 +282,3 @@ export type TaskDetailQueryParams = z.infer<typeof taskDetailQuerySchema>;
 export const taskDetailIdSchema = z.object({
   id: z.union([z.number(), z.string()]).transform(val => Number(val))
 });
-
-// Default export for backward compatibility
-import { getDefaultConnection } from '../../config/database.config';
-const defaultTaskDetailModel = initTaskDetailModel(getDefaultConnection());
-export default defaultTaskDetailModel;

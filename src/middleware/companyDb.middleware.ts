@@ -51,7 +51,6 @@ export const setCompanyDatabase = async (
             req.currentDBName = 'default';
             req.currentCompanyId = 0;
             req.localUserId = null; // ADDED: Set localUserId to null
-            console.log('🔓 No token - using default database');
             next();
             return;
         }
@@ -75,11 +74,9 @@ export const setCompanyDatabase = async (
                 const dbConnection = await getUserDatabaseConnectionFromToken(token);
                 if (dbConnection) {
                     req.companyDB = dbConnection;
-                    console.log(`🔄 Session cache - DB: ${session.dbName} | Company: ${session.companyId} (${session.companyName}) | LocalUser: ${session.localUserId}`);
                 } else {
                     req.companyDB = getDefaultConnection();
                     req.currentDBName = 'default';
-                    console.log(`⚠️ Session cache - DB connection failed, using default`);
                 }
             } catch (dbError) {
                 console.error(`⚠️ Failed to connect to ${session.dbName}:`, dbError);
@@ -92,7 +89,6 @@ export const setCompanyDatabase = async (
         }
 
         // ── Slow path: not in cache — look up in User_Portal ────────────────
-        console.log('🔍 Token not in cache - looking up in User_Portal_Test...');
         
         const UserModel = initUserModel(getDefaultConnection());
         const user = await UserModel.unscoped().findOne({
@@ -102,7 +98,6 @@ export const setCompanyDatabase = async (
 
         if (!user) {
             // Invalid token — fall through to default
-            console.log('⚠️ Invalid token - using default database');
             req.companyDB = getDefaultConnection();
             req.currentDBName = 'default';
             req.currentCompanyId = 0;
@@ -124,7 +119,6 @@ export const setCompanyDatabase = async (
             if (companyConfig) {
                 dbName = companyConfig.database;
                 companyName = companyConfig.name;
-                console.log(`📌 Found company config for ID ${companyId}: ${companyName} (${dbName})`);
             }
         }
         
@@ -136,7 +130,6 @@ export const setCompanyDatabase = async (
         // Store session for future requests
         if (dbName && companyId) {
             storeTokenSession(token, user.Global_User_ID, localUserId, companyId, dbName, companyName || '', user); // UPDATED: Added localUserId and user parameter
-            console.log(`📝 New session stored for user ${user.UserName}, company ${companyId}, LocalUser ${localUserId}`);
         }
 
         req.user = user;
@@ -152,11 +145,9 @@ export const setCompanyDatabase = async (
                 const dbConnection = await getUserDatabaseConnectionFromToken(token);
                 if (dbConnection) {
                     req.companyDB = dbConnection;
-                    console.log(`✅ Connected to company database: ${dbName} (Company ${companyId}) | LocalUser: ${localUserId}`);
                 } else {
                     req.companyDB = getDefaultConnection();
                     req.currentDBName = 'default';
-                    console.log(`⚠️ Could not connect to ${dbName}, using default`);
                 }
             } catch (dbError) {
                 console.error(`⚠️ Failed to connect to ${dbName}:`, dbError);
@@ -208,6 +199,8 @@ export const requireAuthMiddleware = (req: Request, res: Response, next: NextFun
     }
     next();
 };
+
+
 
 /** Helper to get database connection from request */
 export const getDbConnection = (req: Request): Sequelize => {

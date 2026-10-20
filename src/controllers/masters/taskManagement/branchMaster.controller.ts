@@ -95,9 +95,10 @@ export const getAllBranches = async (req: Request, res: Response) => {
         const replacements: any = {};
         
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId) {
             whereStr += ' AND Company_Id = :companyId';
-            replacements.companyId = user.currentCompanyId;
+            replacements.companyId = currentCompanyId;
         }
 
         if (search) {
@@ -165,7 +166,8 @@ export const getBranchById = async (req: Request, res: Response) => {
         }
 
         const user = (req as any).user;
-        if (user && user.currentCompanyId && branch.Company_id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && branch.Company_id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to access this branch');
         }
 
@@ -199,9 +201,10 @@ export const createBranch = async (req: Request, res: Response) => {
 
         const data = validation.data!;
         const user = (req as any).user;
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
         
-        if (user && user.currentCompanyId && !data.Company_id) {
-            data.Company_id = user.currentCompanyId;
+        if (currentCompanyId && !data.Company_id) {
+            data.Company_id = currentCompanyId;
         }
 
         const Branch = getBranchModel(req);

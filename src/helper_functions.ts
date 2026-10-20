@@ -315,7 +315,6 @@ export const formatDateForDatetimeLocal = (date: Date): string => {
 
         return `${year}-${month}-${day}T${hours}:${minutes}`;
     } catch (e) {
-        console.log('Error in formatDateForDatetimeLocal function: ', e);
         return formatDateForDatetimeLocal(new Date());
     }
 };
@@ -421,7 +420,6 @@ export const filterableText = (text: string): string => {
     try {
         return String(trimText(text, ' ')).toLowerCase();
     } catch (e) {
-        console.log('Error while convert to filterable text:', e);
         return '';
     }
 };

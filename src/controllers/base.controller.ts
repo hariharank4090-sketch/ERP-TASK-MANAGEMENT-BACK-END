@@ -24,10 +24,8 @@ import { getDefaultConnection } from '../config/database.config';
  */
 export const getDbConnection = (req: Request): Sequelize => {
     if (req.companyDB && req.currentDBName && req.currentDBName !== 'default') {
-        console.log(`📊 Controller using company DB: ${req.currentDBName}`);
         return req.companyDB;
     }
-    console.log(`📊 Controller using default DB (User_Portal)`);
     return getDefaultConnection();
 };
 

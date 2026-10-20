@@ -174,12 +174,10 @@ const validateWithZod = <T>(schema: any, data: any) => {
 const getSequelizeFromRequest = (req: Request): Sequelize => {
     // Use companyDB from middleware
     if (req.companyDB) {
-        console.log(`✅ Using companyDB from request: ${(req.companyDB as any).config?.database || 'unknown'}`);
         return req.companyDB;
     }
     
     // Fallback to default connection
-    console.log(`⚠️ No companyDB in request, using default connection`);
     const { getDefaultConnection } = require('../../config/database.config');
     return getDefaultConnection();
 };
@@ -329,8 +327,6 @@ export const createUser = async (req: Request, res: Response) => {
         const sequelizeInstance = getSequelizeFromRequest(req);
         const UserModel = initializeUserModel(sequelizeInstance);
         
-        console.log('Request Body:', req.body);
-        console.log(`📊 Using database: ${(sequelizeInstance as any).config?.database || 'unknown'}`);
         
         const validation = validateWithZod<UserCreateInput>(
             userCreateSchema,
@@ -364,7 +360,6 @@ export const createUser = async (req: Request, res: Response) => {
 
         // Get next ID
         const nextId = await UserModel.getNextId(sequelizeInstance);
-        console.log(`📝 Next available ID: ${nextId}`);
 
         // Create the user - force UserTypeId to 6
         const user = await UserModel.create({

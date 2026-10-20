@@ -97,12 +97,10 @@ const validateWithZod = <T>(schema: any, data: any) => {
 const getSequelizeFromRequest = (req: Request): Sequelize => {
     // Use companyDB from middleware
     if (req.companyDB) {
-        console.log(`✅ Using companyDB from request: ${(req.companyDB as any).config?.database || 'unknown'}`);
         return req.companyDB;
     }
     
     // Fallback to default connection
-    console.log(`⚠️ No companyDB in request, using default connection`);
     const { getDefaultConnection } = require('../../../config/database.config');
     return getDefaultConnection();
 };
@@ -225,9 +223,6 @@ export const createLeaveType = async (req: Request, res: Response) => {
         const sequelizeInstance = getSequelizeFromRequest(req);
         const LeaveTypeModel = initializeLeaveTypeModel(sequelizeInstance);
         
-        console.log('Request Body:', req.body);
-        console.log(`📊 Using database: ${(sequelizeInstance as any).config?.database || 'unknown'}`);
-        console.log(`📊 Company ID: ${req.currentCompanyId}, DB Name: ${req.currentDBName}`);
         
         const validation = validateWithZod<LeaveTypeCreateInput>(
             leaveTypeCreateSchema,
@@ -260,7 +255,6 @@ export const createLeaveType = async (req: Request, res: Response) => {
 
         // Get next ID
         const nextId = await LeaveTypeModel.getNextId(sequelizeInstance);
-        console.log(`📝 Next available ID: ${nextId}`);
 
         // Create the leave type
         const leaveType = await LeaveTypeModel.create({

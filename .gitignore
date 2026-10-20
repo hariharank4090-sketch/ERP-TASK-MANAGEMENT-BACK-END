@@ -2,6 +2,7 @@
 package-lock.json
 .env
 
+
 logs/
 uploads/visitLogs/
 uploads/products/

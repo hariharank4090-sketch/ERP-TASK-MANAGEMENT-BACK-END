@@ -11,7 +11,7 @@ import {
 
 dotenv.config();
 
-const userPortalDB: string | undefined = process.env.USERPORTALDB;
+const userPortalDB: string | undefined = process.env.DATABASE;
 
 // Helper function to check if value is a valid number
 export const checkIsNumber = (value: any): boolean => {
@@ -166,7 +166,7 @@ export const getUserIdByAuth = async (Auth: string): Promise<number | false> => 
 
 export const getUserTypeBasedRights = async (usertype: string | number): Promise<MenuRights[] | false> => {
     if (!userPortalDB) {
-        console.error('USERPORTALDB environment variable is not defined');
+        console.error('DATABASE environment variable is not defined');
         return false;
     }
 
@@ -203,7 +203,7 @@ export const getUserBasedRights = async (userid: string | number): Promise<MenuR
     }
 
     if (!userPortalDB) {
-        console.error('USERPORTALDB environment variable is not defined');
+        console.error('DATABASE environment variable is not defined');
         return false;
     }
 
@@ -236,7 +236,7 @@ export const getUserBasedRights = async (userid: string | number): Promise<MenuR
 
 export const getUserMenuRights = async (Auth: string): Promise<MenuRights[] | false> => {
     if (!userPortalDB) {
-        console.error('USERPORTALDB environment variable is not defined');
+        console.error('DATABASE environment variable is not defined');
         return false;
     }
 

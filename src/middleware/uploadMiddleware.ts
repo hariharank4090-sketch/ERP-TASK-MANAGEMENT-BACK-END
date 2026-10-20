@@ -77,7 +77,7 @@ const uploadFile = (
                 }
             } else {
                 if (!req.file) {
-                    reject(new Error('No file uploaded'));
+                    resolve();
                 } else {
                     resolve();
                 }

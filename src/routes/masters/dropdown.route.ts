@@ -12,7 +12,7 @@ import {
 } from '../../controllers/dropdown/dropdown.controller';
 
 import { authenticate } from '../../middleware/auth';
-import { setCompanyDatabase, requireCompanyDB } from '../../middleware/database.middleware';
+import { setCompanyDatabase, requireCompanyDB } from '../../middleware/companyDb.middleware';
 
 const router = express.Router();
 

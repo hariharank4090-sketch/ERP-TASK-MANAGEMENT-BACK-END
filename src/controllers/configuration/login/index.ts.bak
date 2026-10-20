@@ -53,7 +53,6 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             });
         }
 
-        console.log('🔐 Login attempt:', username);
 
         const sequelize = getDefaultConnection();
         const UserModel = initUserModel(sequelize);
@@ -342,7 +341,6 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
             const connection = await getCompanyDatabase(companyConfig.id);
             if (connection) dbConnected = true;
         } catch {
-            console.log(`⚠️ Could not connect to ${companyConfig.name}, will retry on first use`);
         }
 
         return res.status(200).json({
@@ -609,7 +607,6 @@ export const changePassword = async (req: Request, res: Response): Promise<Respo
                         }
                     }
                 );
-                console.log(`✅ Synced password update for username ${user.UserName} to company database`);
             } catch (companyDbErr) {
                 console.error('⚠️ Failed to sync password to company database:', companyDbErr);
             }

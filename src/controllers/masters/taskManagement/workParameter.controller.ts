@@ -38,11 +38,9 @@ const validateWithZod = <T>(schema: any, data: any) => {
 /* ================= HELPER: Get Sequelize Instance from Request ================= */
 const getSequelizeFromRequest = (req: Request): Sequelize => {
     if (req.companyDB) {
-        console.log(`✅ Using companyDB: ${(req.companyDB as any).config?.database || 'unknown'}`);
         return req.companyDB;
     }
     
-    console.log(`⚠️ No companyDB, using default connection`);
     const { getDefaultConnection } = require('../../../config/database.config');
     return getDefaultConnection();
 };
@@ -201,8 +199,6 @@ export const createWorkParameter = async (req: Request, res: Response) => {
         const WorkParameterModel = initializeWorkParameterModel(sequelizeInstance);
         const WorkMasterModel = initializeWorkMasterModel(sequelizeInstance);
         
-        console.log(`📊 Creating work parameter in database: ${(sequelizeInstance as any).config?.database || 'unknown'}`);
-        console.log(`📊 Company ID: ${req.currentCompanyId}, DB Name: ${req.currentDBName}`);
         
         const validation = validateWithZod<WorkParameterCreateInput>(
             workParameterCreateSchema,

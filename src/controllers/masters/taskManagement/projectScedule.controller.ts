@@ -247,7 +247,6 @@ export const getAllSchedules = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Querying schedules from database: ${currentDBName}`);
 
         const validation = validateWithZod<ScheduleQuery>(ScheduleQuerySchema, req.query);
         if (!validation.success) {
@@ -445,7 +444,6 @@ export const getScheduleById = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Getting schedule by ID from database: ${currentDBName}`);
 
         const validation = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
         if (!validation.success) {
@@ -481,7 +479,6 @@ export const getScheduleDetails = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Getting schedule details from database: ${currentDBName}`);
 
         const validation = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
         if (!validation.success) {
@@ -747,8 +744,6 @@ export const createSchedule = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Creating schedule in database: ${currentDBName}`);
-        console.log('Create Schedule Request Body:', JSON.stringify(req.body, null, 2));
 
         const body = {
             ...req.body,
@@ -758,7 +753,6 @@ export const createSchedule = async (req: Request, res: Response) => {
 
         const validation = validateWithZod<ScheduleCreate>(ScheduleCreateSchema, body);
         if (!validation.success) {
-            console.log('Validation Errors:', JSON.stringify(validation.errors, null, 2));
             return res.status(400).json({
                 success: false,
                 message: 'Validation failed',
@@ -802,8 +796,6 @@ export const createSchedule = async (req: Request, res: Response) => {
                 });
             }
 
-            console.log('Plan 5 Auto Start Date:', Sch_Start_Date);
-            console.log('Plan 5 Auto End Date:', Sch_End_Date);
         }
 
         if (Sch_Plan_Id !== 5) {
@@ -863,7 +855,7 @@ export const createSchedule = async (req: Request, res: Response) => {
                   Sch_Start_Date, Sch_End_Date, Sch_First_Start_Date, Sch_First_End_Date, Task_Sch_Timer_Based,
                   Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
                   Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, ${Sch_Status === 3 ? 'GETDATE()' : 'NULL'})`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, CASE WHEN ? = 3 THEN GETDATE() ELSE NULL END)`,
                 {
                     replacements: [
                         nextSchId,
@@ -882,7 +874,8 @@ export const createSchedule = async (req: Request, res: Response) => {
                         safeEstEnd,
                         safeDuration,
                         Sch_Status,
-                        safeEntryBy
+                        safeEntryBy,
+                        Sch_Status
                     ],
                     type: QueryTypes.INSERT,
                     transaction
@@ -898,19 +891,13 @@ export const createSchedule = async (req: Request, res: Response) => {
             let taskDatesToInsert: Date[] = [];
 
             if (Sch_Plan_Id === 5) {
-                console.log('Plan 5 - specificDates from frontend:', specificDates);
 
                 if (specificDates && specificDates.length > 0) {
                     taskDatesToInsert = specificDates
                         .filter(ds => ds && /^\d{4}-\d{2}-\d{2}$/.test(ds))
                         .map(ds => parseDateString(ds));
-                    console.log(
-                        `Plan 5: Using ${taskDatesToInsert.length} specific dates from frontend (IGNORING Sch_Start_Date/Sch_End_Date):`,
-                        taskDatesToInsert.map(d => formatDateForSQL(d))
-                    );
                 } else if (Sch_Start_Date) {
                     taskDatesToInsert = [new Date(Sch_Start_Date)];
-                    console.log(`Plan 5: No specific dates provided, falling back to Sch_Start_Date: ${formatDateForSQL(Sch_Start_Date)}`);
                 } else {
                     console.warn(`Plan 5: No specific dates and no start date provided - no task dates will be created`);
                 }
@@ -923,13 +910,10 @@ export const createSchedule = async (req: Request, res: Response) => {
                     planDetails,
                     specificDates || []
                 );
-                console.log(`Plan ${Sch_Plan_Id}: Generated ${taskDatesToInsert.length} task dates from range`);
             }
 
             if (taskDatesToInsert.length > 0) {
                 await insertTaskDates(db, nextSchId, taskDatesToInsert, safeEstStart, safeEstEnd, transaction);
-                console.log(`Inserted ${taskDatesToInsert.length} task dates for schedule ${nextSchId}`);
-                console.log(`Inserted dates:`, taskDatesToInsert.map(d => formatDateForSQL(d)));
             } else {
                 console.warn(`No task dates generated for schedule ${nextSchId}`);
             }
@@ -960,8 +944,6 @@ export const createSchedule = async (req: Request, res: Response) => {
                 ) as any[]
                 : [];
 
-            console.log('Final task dates saved to tbl_Project_Sch_Task_DT:', taskDatesResult.map(t => t.Task_Work_Date));
-            console.log('Final schedule saved to tbl_Project_Schedule:', data[0]?.Sch_Id, data[0]?.Sch_No);
 
             return created(res, {
                 ...data[0],
@@ -1022,7 +1004,6 @@ export const updateSchedule = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Updating schedule in database: ${currentDBName}`);
 
         const idCheck = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
         if (!idCheck.success) {
@@ -1049,8 +1030,6 @@ export const updateSchedule = async (req: Request, res: Response) => {
             updateData.Sch_Start_Date = parseDateString(sortedDates[0]);
             updateData.Sch_End_Date = parseDateString(sortedDates[sortedDates.length - 1]);
 
-            console.log('Update Plan 5 Auto Start Date:', updateData.Sch_Start_Date);
-            console.log('Update Plan 5 Auto End Date:', updateData.Sch_End_Date);
         }
 
         // Confirm schedule exists and get current status for completion date handling
@@ -1359,7 +1338,6 @@ export const updateScheduleStatus = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Updating schedule status in database: ${currentDBName}`);
 
         const idCheck = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
         if (!idCheck.success) {
@@ -1442,7 +1420,6 @@ export const deleteSchedule = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Deleting schedule from database: ${currentDBName}`);
 
         const validation = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
         if (!validation.success) {
@@ -1466,7 +1443,6 @@ export const getSchedulePlansDropdown = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Getting schedule plans dropdown from database: ${currentDBName}`);
 
         const rows = await db.query(
             `SELECT Plan_Id as value, Plan_Type as label FROM tbl_Sch_Plan ORDER BY Plan_Id`,
@@ -1484,7 +1460,6 @@ export const getTasksDropdown = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Getting tasks dropdown from database: ${currentDBName}`);
 
         const rows = await db.query(
             `SELECT Task_Id as value, Task_Name as label FROM tbl_Task ORDER BY Task_Name`,
@@ -1517,7 +1492,6 @@ export const getScheduleDropdown = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Getting schedule dropdown from database: ${currentDBName}`);
 
         const rows = await db.query(
             `SELECT s.Sch_Id as value, s.Sch_No + ' - ' + ISNULL(t.Task_Name, 'No Task') as label
@@ -1539,7 +1513,6 @@ export const getAllActiveSchedules = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Getting active schedules from database: ${currentDBName}`);
 
         const rows = await db.query(
             `WITH ExtensionCounts AS (
@@ -1570,7 +1543,6 @@ export const getExtensionsByScheduleId = async (req: Request, res: Response) => 
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
-        console.log(`📊 Getting extensions from database: ${currentDBName}`);
 
         const idCheck = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
         if (!idCheck.success) {

@@ -112,8 +112,9 @@ export const getAllProjects = async (req: Request, res: Response) => {
         
         // Add company filter if user has company restriction
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
-            whereClause.Company_Id = user.currentCompanyId;
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId) {
+            whereClause.Company_Id = currentCompanyId;
         }
 
         // Use raw query for performance on large datasets
@@ -121,9 +122,9 @@ export const getAllProjects = async (req: Request, res: Response) => {
         let whereStr = '1=1';
         const replacements: any = {};
         
-        if (user && user.currentCompanyId) {
+        if (currentCompanyId) {
             whereStr += ' AND Company_Id = :companyId';
-            replacements.companyId = user.currentCompanyId;
+            replacements.companyId = currentCompanyId;
         }
 
         const rawQuery = `
@@ -190,7 +191,8 @@ export const getProjectById = async (req: Request, res: Response) => {
         
         // Check if user has access to this project
         const user = (req as any).user;
-        if (user && user.currentCompanyId && project.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && project.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to access this project');
         }
 
@@ -233,7 +235,8 @@ export const getProjectsByCompany = async (req: Request, res: Response) => {
         
         // Check if user has access to this company
         const user = (req as any).user;
-        if (user && user.currentCompanyId && parseInt(companyId) !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && parseInt(companyId) !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to view projects for this company');
         }
 
@@ -513,7 +516,8 @@ export const updateProject = async (req: Request, res: Response) => {
         
         // Check if user has access to this project
         const user = (req as any).user;
-        if (user && user.currentCompanyId && project.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && project.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to update this project');
         }
 
@@ -607,7 +611,8 @@ export const deleteProject = async (req: Request, res: Response) => {
         
         // Check if user has access to this project
         const user = (req as any).user;
-        if (user && user.currentCompanyId && project.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && project.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to delete this project');
         }
 
@@ -733,7 +738,8 @@ export const toggleProjectStatus = async (req: Request, res: Response) => {
         
         // Check if user has access to this project
         const user = (req as any).user;
-        if (user && user.currentCompanyId && project.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && project.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to modify this project');
         }
 
@@ -952,7 +958,8 @@ export const reactivateProject = async (req: Request, res: Response) => {
         
         // Check if user has access to this project
         const user = (req as any).user;
-        if (user && user.currentCompanyId && project.Company_Id !== user.currentCompanyId) {
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId && project.Company_Id !== currentCompanyId) {
             return handleForbiddenError(res, 'You do not have permission to reactivate this project');
         }
 
@@ -1005,8 +1012,9 @@ export const getProjectsForDropdown = async (req: Request, res: Response) => {
         
         // Add company filter if user has company restriction
         const user = (req as any).user;
-        if (user && user.currentCompanyId) {
-            whereClause.Company_Id = user.currentCompanyId;
+        const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
+        if (currentCompanyId) {
+            whereClause.Company_Id = currentCompanyId;
         }
 
         const projects = await Project.findAll({

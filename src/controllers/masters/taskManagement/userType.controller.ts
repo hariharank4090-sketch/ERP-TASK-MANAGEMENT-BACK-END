@@ -161,7 +161,6 @@ export const createUserType = async (req: Request, res: Response): Promise<Respo
             IsActive: IsActive ?? 1,
         });
 
-        console.log(`✅ UserType created: "${UserType}" (ID: ${newUserType.Id}) in ${req.currentDBName}`);
 
         return res.status(201).json({
             status:  'success',
@@ -248,7 +247,6 @@ export const updateUserType = async (req: Request, res: Response): Promise<Respo
 
         await userType.update(parsed.data);
 
-        console.log(`✅ UserType updated: ID ${id} in ${req.currentDBName}`);
 
         return res.status(200).json({
             status:  'success',
@@ -319,7 +317,6 @@ export const deleteUserType = async (req: Request, res: Response): Promise<Respo
         // Soft delete
         await userType.update({ IsActive: 0 });
 
-        console.log(`✅ UserType soft-deleted: ID ${id} ("${userType.UserType}") in ${req.currentDBName}`);
 
         return res.status(200).json({
             status:  'success',

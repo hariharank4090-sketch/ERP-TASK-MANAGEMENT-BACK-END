@@ -19,7 +19,7 @@ import appRoutes from './routes/index.route';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT;
 
 // ─── Core middleware ─────────────────────────────────────────────────────────
 
@@ -29,16 +29,6 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan(':method :url :status :response-time ms'));
 
-// Request logger (omits passwords)
-app.use((req, _res, next) => {
-    console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.path}`);
-    const body = { ...req.body };
-    if (body.password) body.password = '[redacted]';
-    if (body.Password) body.Password = '[redacted]';
-    if (Object.keys(body).length) console.log('📝 Body:', body);
-    next();
-});
-
 createUploadFolders();
 
 // ─── DB boot ─────────────────────────────────────────────────────────────────
@@ -46,7 +36,6 @@ createUploadFolders();
 (async () => {
     try {
         await sequelize.authenticate();
-        console.log('✅ Connected to User Portal DB:', process.env.DATABASE || 'User_Portal');
     } catch (err) {
         console.error('❌ DB connection failed:', err);
         process.exit(1);
@@ -107,8 +96,6 @@ const indexPath = path.join(reactBuildPath, 'index.html');
 const hasFrontend = fs.existsSync(indexPath);
 
 if (hasFrontend) {
-    console.log('✅ Frontend build found at:', reactBuildPath);
-
     // Serve static files from frontend directory
     app.use(express.static(reactBuildPath));
 
@@ -159,11 +146,9 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 // ─── Graceful shutdown ───────────────────────────────────────────────────────
 
 const gracefulShutdown = async () => {
-    console.log('\n🛑 Shutting down…');
     try {
         await closeAllCompanyConnections();
         await sequelize.close();
-        console.log('✅ All connections closed');
         process.exit(0);
     } catch (err) {
         console.error('❌ Shutdown error:', err);
@@ -179,12 +164,10 @@ process.on('unhandledRejection', (r, p) => { console.error('❌ unhandledRejecti
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 const server = app.listen(PORT, () => {
-    console.log('\n' + '='.repeat(60));
-    console.log('🚀 Server running');
-    console.log(`📍 http://localhost:${PORT}`);
-    console.log(`📚 Docs: http://localhost:${PORT}/api-docs`);
-    console.log(`❤️  Health: http://localhost:${PORT}/health`);
-    console.log('='.repeat(60) + '\n');
+    console.log(`Server running at http://localhost:${PORT}`);
+    
+
+    
 });
 
 // Keep HTTP connections alive for reuse (reduces TCP handshake overhead)

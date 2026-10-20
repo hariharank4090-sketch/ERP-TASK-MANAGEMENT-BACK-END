@@ -46,7 +46,6 @@ async function resolveUserIdColumn(sequelize: Sequelize): Promise<string> {
             type: QueryTypes.SELECT, raw: true,
         });
         idColumnCache.set(dbName, 'Global_User_ID');
-        console.log(`[resolveUserIdColumn] Using Global_User_ID for ${dbName}`);
         return 'Global_User_ID';
     } catch (_) {}
 
@@ -55,7 +54,6 @@ async function resolveUserIdColumn(sequelize: Sequelize): Promise<string> {
             type: QueryTypes.SELECT, raw: true,
         });
         idColumnCache.set(dbName, 'Local_User_ID');
-        console.log(`[resolveUserIdColumn] Using Local_User_ID for ${dbName}`);
         return 'Local_User_ID';
     } catch (_) {}
 
@@ -112,7 +110,6 @@ export const getProjectHeads = async (
         type: QueryTypes.SELECT, raw: true,
     });
 
-    console.log(`[getProjectHeads] DB: ${sequelize.config.database} | rows: ${rows.length}`);
     return rows
         .filter(r => r.label != null)
         .map(r => ({ UserId: r.UserId, label: r.label || '' }));
@@ -134,7 +131,6 @@ export const getEmployees = async (
     if (!req) throw new Error('Request object is required');
     const sequelize = getSequelize(req);
     const idCol     = await resolveUserIdColumn(sequelize);
-    console.log(`[getEmployees] DB: ${sequelize.config.database}`);
     return fetchUsers(sequelize, idCol, activeOnly);
 };
 
@@ -200,7 +196,6 @@ export const getProjects = async (
         type: QueryTypes.SELECT, raw: true,
     });
 
-    console.log(`[getProjects] DB: ${sequelize.config.database} | rows: ${rows.length}`);
     return rows.filter(r => r.label != null).map(r => ({ value: r.value, label: r.label || '' }));
 };
 
@@ -230,7 +225,6 @@ export const getCompany = async (
     const resolvedId   = companyId   ?? session?.companyId;
     const resolvedName = companyName ?? session?.companyName;
 
-    console.log(`[getCompany] companyId=${resolvedId} | companyName=${resolvedName}`);
 
     if (!resolvedId) {
         console.warn('[getCompany] No companyId found');

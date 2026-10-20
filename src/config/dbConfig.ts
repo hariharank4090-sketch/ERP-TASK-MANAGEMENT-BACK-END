@@ -11,10 +11,10 @@ dotenv.config();
 
 
 const config: sql.config = {
-    server: process.env.SERVER as string,
+    server: (process.env.DB_HOST || process.env.SERVER) as string,
     database: process.env.DATABASE as string,
-    user: process.env.USER as string,
-    password: process.env.PASSWORD as string,
+    user: (process.env.DB_USER || process.env.USER) as string,
+    password: (process.env.DB_PASSWORD || process.env.PASSWORD) as string,
     driver: "SQL Server",
     options: {
         trustedConnection: true,
@@ -26,9 +26,7 @@ const config: sql.config = {
 export const connectDB = () => {
     sql.connect(config, (err) => {
         if (err) {
-            console.log(err);
         } else {
-            console.log("connected Successfully -----");
         }
     })
 };

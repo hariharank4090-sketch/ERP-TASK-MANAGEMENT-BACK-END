@@ -585,7 +585,7 @@ export const employeewise = async (req: Request, res: Response): Promise<Respons
                     al.AttendanceDate AS LogDateTime,           
                     CAST(al.AttendanceDate AS DATE) AS LogDate
                 FROM tbl_Employee_Master em
-                LEFT JOIN tbl_Users u ON u.UserId = em.User_Mgt_Id
+                LEFT JOIN tbl_Users u ON u.Global_User_ID = em.User_Mgt_Id
                 LEFT JOIN etimetracklite1.dbo.Employees pd 
                     ON CAST(pd.EmployeeCode AS NVARCHAR(50)) = em.fingerPrintEmpId
                 LEFT JOIN etimetracklite1.dbo.AttendanceLogs al 

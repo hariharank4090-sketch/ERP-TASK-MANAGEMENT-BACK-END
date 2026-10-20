@@ -88,7 +88,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     if (requiredPermission === 'delete_parammaster' && user.UserTypeId !== 1) {
         return false;
     }
-    if (requiredPermission === 'view_parammaster' && ![1, 2, 3].includes(user.UserTypeId)) {
+    if (requiredPermission === 'view_parammaster' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
         return false;
     }
     

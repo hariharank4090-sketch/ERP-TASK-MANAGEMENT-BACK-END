@@ -48,30 +48,25 @@ export const verifyLegacyPassword = async (plainPassword: string, storedPassword
 
 export const verifyPasswordCombined = async (plainPassword: string, storedPassword: string): Promise<boolean> => {
     if (!storedPassword) {
-        console.log("No stored password found");
         return false;
     }
     
     // Method 1: Direct comparison
     if (plainPassword === storedPassword) {
-        console.log("✅ Password matched via direct comparison");
         return true;
     }
     
     // Method 2: BCrypt
     const bcryptValid = await verifyPassword(plainPassword, storedPassword);
     if (bcryptValid) {
-        console.log("✅ Password matched via bcrypt");
         return true;
     }
     
     // Method 3: Legacy verification
     const legacyValid = await verifyLegacyPassword(plainPassword, storedPassword);
     if (legacyValid) {
-        console.log("✅ Password matched via legacy verification");
         return true;
     }
     
-    console.log("❌ All password verification methods failed");
     return false;
 };

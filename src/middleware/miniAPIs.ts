@@ -63,7 +63,6 @@ export const getUserTypeByAuth = async (authToken: string, req?: Request): Promi
     }
 
     try {
-        console.log(`🔍 Looking up user with token: ${cleanToken.substring(0, 30)}...`);
         
         // Get connection to User Portal DB
         const defaultPool = await getDefaultSqlConnection();
@@ -88,7 +87,6 @@ export const getUserTypeByAuth = async (authToken: string, req?: Request): Promi
         }
 
         const user = userResult.recordset[0];
-        console.log(`✅ User found: ${user.UserName}, Global_User_ID: ${user.Global_User_ID}, UserTypeId: ${user.UserTypeId}, Company_Id: ${user.Company_Id}`);
         
         // Store company ID and user info in request for later use
         if (req) {
@@ -103,7 +101,6 @@ export const getUserTypeByAuth = async (authToken: string, req?: Request): Promi
 
         // If UserTypeId is directly in tbl_Users, return it (allowing 0 for Super Admin)
         if (user.UserTypeId !== null && user.UserTypeId !== undefined && user.UserTypeId >= 0) {
-            console.log(`✅ UserTypeId from User Portal: ${user.UserTypeId}`);
             return Number(user.UserTypeId);
         }
 
@@ -138,7 +135,6 @@ export const getUserIdByAuth = async (authToken: string, req?: Request): Promise
                 (req as any).companyId = user.Company_Id;
                 (req as any).currentCompanyId = user.Company_Id;
             }
-            console.log(`✅ Found Global_User_ID: ${user.Global_User_ID}`);
             return Number(user.Global_User_ID);
         }
         console.error(`❌ No user found for token`);
@@ -271,7 +267,6 @@ export const getUserMenuRights = async (authToken: string, req?: Request): Promi
             return false;
         }
         
-        console.log(`🔍 Getting menu rights for token: ${cleanToken.substring(0, 30)}...`);
         
         const UserTypeId = await getUserTypeByAuth(cleanToken, req);
         
@@ -280,13 +275,11 @@ export const getUserMenuRights = async (authToken: string, req?: Request): Promi
             return false;
         }
 
-        console.log(`✅ UserTypeId: ${UserTypeId}`);
         
         const pool = await getConnectionPoolForCompany(req);
 
         // Admin (0) and Management (1) users get all permissions
         if (isEqualNumber(UserTypeId, 0) || isEqualNumber(UserTypeId, 1)) {
-            console.log(`👑 Admin/Management user - granting full permissions`);
             const result = await pool.request().query(`
                 SELECT 
                     *, 
@@ -308,7 +301,6 @@ export const getUserMenuRights = async (authToken: string, req?: Request): Promi
                 return false;
             }
             
-            console.log(`👤 Regular user - checking specific rights for GlobalUserId: ${GlobalUserId}`);
             
             const result = await pool.request()
                 .input('globalUserId', GlobalUserId)

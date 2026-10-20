@@ -105,15 +105,11 @@ export const authenticate = async (
                 req.companyDB = getDefaultConnection();
             }
 
-            console.log(
-                `✅ Auth (cache) — user: ${user.Global_User_ID} | Global_User_ID: ${user.Global_User_ID} | Local_User_ID: ${req.localUserId || 'N/A'} | UserTypeId: ${user.UserTypeId} | DB: ${session.dbName}`,
-            );
             next();
             return;
         }
 
         // ── Slow path: token not in cache — look up in DB ─────────────────────
-        console.log('🔍 Token not in cache — checking database...');
 
         const defaultDb = getDefaultConnection();
         const [users] = await defaultDb.query(
@@ -166,9 +162,6 @@ export const authenticate = async (
             req.companyDB = getDefaultConnection();
         }
 
-        console.log(
-            `✅ Auth (db) — user: ${user.Global_User_ID} | Global_User_ID: ${user.Global_User_ID} | Local_User_ID: ${localUserId || 'N/A'} | UserTypeId: ${user.UserTypeId} | DB: ${dbName || 'default'}`,
-        );
         next();
 
     } catch (err) {
@@ -227,7 +220,6 @@ export const authorize = (allowedRoles: number[]) => {
             // ── Super Admin bypass (UserTypeId = 0) ───────────────────────────
             // UserTypeId 0 = Super Admin, full access to all routes
             if (userTypeId === 0) {
-                console.log(`✅ Super Admin — user: ${user.UserName} (UserTypeId: 0) | Local_User_ID: ${req.localUserId || 'N/A'} — full access granted`);
                 next();
                 return;
             }
@@ -263,7 +255,6 @@ export const authorize = (allowedRoles: number[]) => {
                 return;
             }
 
-            console.log(`✅ Authorized — user: ${user.UserName} | Global_User_ID: ${user.Global_User_ID} | Local_User_ID: ${req.localUserId || 'N/A'} | UserTypeId: ${userTypeId}`);
             next();
 
         } catch (err) {

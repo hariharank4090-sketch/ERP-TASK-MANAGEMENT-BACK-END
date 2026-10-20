@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { Sequelize, Transaction } from 'sequelize';
 import sql from 'mssql';
 import dotenv from 'dotenv';
@@ -13,6 +15,7 @@ export interface CompanyDBConfig {
     database: string;
     port?: number;
     instance?: string;
+    rawHost?: string;
 }
 
 export interface TokenSession {
@@ -126,17 +129,23 @@ export const getDefaultSqlConnection = async (): Promise<sql.ConnectionPool> => 
         return defaultSqlPool;
     }
 
+    const rawHost = process.env.DB_HOST || process.env.SERVER || 'localhost';
+    const h = parseHostString(rawHost);
+    const usePort = h.port ?? (h.instance ? undefined : 1433);
+
     const config: sql.config = {
-        server: process.env.SERVER as string,
+        server: h.server,
+        ...(usePort && { port: usePort }),
         database: process.env.DATABASE as string,
-        user: process.env.USER as string,
-        password: process.env.PASSWORD as string,
+        user: (process.env.DB_USER || process.env.USER) as string,
+        password: (process.env.DB_PASSWORD || process.env.PASSWORD) as string,
         options: {
             encrypt: false,
             trustServerCertificate: true,
             requestTimeout: 60000,
             connectTimeout: 60000,     // WAN-safe: remote server needs more time to connect
             enableArithAbort: true,   // Faster SQL Server query execution
+            ...(h.instance && !h.port && { instanceName: h.instance }),
         },
         pool: {
             max: 30,
@@ -145,17 +154,100 @@ export const getDefaultSqlConnection = async (): Promise<sql.ConnectionPool> => 
         }
     };
 
-    console.log('🔌 Creating default SQL connection...');
     defaultSqlPool = await sql.connect(config);
-    console.log('✅ Default SQL Connection pool created');
     return defaultSqlPool;
 };
 
 const companyConfigs: Map<number, CompanyDBConfig> = new Map();
 const companyConfigsByDBName: Map<string, CompanyDBConfig> = new Map();
+const dbNameMapping: Map<string, number> = new Map();
+
+function getCompaniesFilePath(): string | null {
+    const candidates = [
+        process.env.COMPANIES_FILE,
+        path.resolve(process.cwd(), 'companies.json'),
+        path.resolve(__dirname, '../../companies.json'),
+        path.resolve(__dirname, 'companies.json'),
+        path.resolve(__dirname, '../companies.json'),
+    ].filter(Boolean) as string[];
+
+    for (const p of candidates) {
+        if (fs.existsSync(p)) {
+            return p;
+        }
+    }
+    return null;
+}
 
 function loadCompanyConfigurations(): void {
-    console.log('📂 Loading company configurations from .env...');
+    const jsonPath = getCompaniesFilePath();
+    let loadedFromJSON = false;
+
+    if (jsonPath) {
+        try {
+            const content = fs.readFileSync(jsonPath, 'utf8');
+            const data = JSON.parse(content);
+            const list: any[] = Array.isArray(data)
+                ? data
+                : Array.isArray(data.companies)
+                ? data.companies
+                : Object.values(data);
+
+            for (const item of list) {
+                if (!item || typeof item !== 'object') continue;
+                const rawId = item.id ?? item.companyId ?? item.COMPANY_ID;
+                const companyId = parseInt(String(rawId), 10);
+                const dbName = item.database ?? item.dbName ?? item.DATABASE;
+                const dbHost = item.host ?? item.dbHost ?? item.DB_HOST;
+                const dbUser = item.user ?? item.dbUser ?? item.DB_USER;
+                const dbPassword = item.password ?? item.dbPassword ?? item.DB_PASSWORD;
+                const name = item.name ?? item.companyName ?? item.COMPANY_NAME ?? `Company ${companyId}`;
+
+                if (!companyId || !dbName || !dbHost || !dbUser || !dbPassword) {
+                    continue;
+                }
+
+                const h = parseHostString(dbHost);
+                const config: CompanyDBConfig = {
+                    id: companyId,
+                    name,
+                    host: h.server,
+                    user: dbUser,
+                    password: dbPassword,
+                    database: dbName,
+                    port: h.port,
+                    instance: h.instance,
+                    rawHost: dbHost,
+                };
+                companyConfigs.set(companyId, config);
+                companyConfigsByDBName.set(dbName, config);
+                dbNameMapping.set(dbName, companyId);
+            }
+
+            // Also load explicit dbNameMapping from JSON if present
+            const rawMapping = data.dbNameMapping || data.DB_NAME_MAPPING || data.db_name_mapping;
+            if (rawMapping) {
+                if (typeof rawMapping === 'string') {
+                    for (const pair of rawMapping.split(',')) {
+                        const [db, id] = pair.split('=');
+                        if (db && id) dbNameMapping.set(db.trim(), parseInt(id.trim(), 10));
+                    }
+                } else if (typeof rawMapping === 'object' && !Array.isArray(rawMapping)) {
+                    for (const [db, id] of Object.entries(rawMapping)) {
+                        dbNameMapping.set(db.trim(), parseInt(String(id), 10));
+                    }
+                }
+            }
+
+            if (companyConfigs.size > 0) {
+                loadedFromJSON = true;
+            }
+        } catch (err: any) {
+            console.error(`⚠️ Failed to load company configurations from ${jsonPath}:`, err.message);
+        }
+    }
+
+    // Fallback: check .env for any COMPANY<N>_ variables
     const companyIndices = new Set<number>();
     for (const key of Object.keys(process.env)) {
         const match = key.match(/^COMPANY(\d+)_/);
@@ -163,31 +255,49 @@ function loadCompanyConfigurations(): void {
             companyIndices.add(parseInt(match[1], 10));
         }
     }
-    const sortedIndices = Array.from(companyIndices).sort((a, b) => a - b);
-    for (const i of sortedIndices) {
-        const dbName = process.env[`COMPANY${i}_DATABASE`];
-        const dbHost = process.env[`COMPANY${i}_DB_HOST`];
-        const dbUser = process.env[`COMPANY${i}_DB_USER`];
-        const dbPassword = process.env[`COMPANY${i}_DB_PASSWORD`];
-        const rawCompanyId = process.env[`COMPANY${i}_ID`];
-        const companyId = parseInt(rawCompanyId ?? `${i}`, 10);
-        if (!companyId || !dbName || !dbHost || !dbUser || !dbPassword) continue;
-        const h = parseHostString(dbHost);
-        const config: CompanyDBConfig = {
-            id: companyId,
-            name: process.env[`COMPANY${i}_NAME`] ?? `Company ${companyId}`,
-            host: h.server,
-            user: dbUser,
-            password: dbPassword,
-            database: dbName,
-            port: h.port,
-            instance: h.instance,
-        };
-        companyConfigs.set(companyId, config);
-        companyConfigsByDBName.set(dbName, config);
-        console.log(`✅ Loaded Company ${companyId}: ${config.name} (${dbName})`);
+    if (companyIndices.size > 0) {
+        if (!loadedFromJSON) {
+        }
+        const sortedIndices = Array.from(companyIndices).sort((a, b) => a - b);
+        for (const i of sortedIndices) {
+            const dbName = process.env[`COMPANY${i}_DATABASE`];
+            const dbHost = process.env[`COMPANY${i}_DB_HOST`];
+            const dbUser = process.env[`COMPANY${i}_DB_USER`];
+            const dbPassword = process.env[`COMPANY${i}_DB_PASSWORD`];
+            const rawCompanyId = process.env[`COMPANY${i}_ID`];
+            const companyId = parseInt(rawCompanyId ?? `${i}`, 10);
+            if (!companyId || !dbName || !dbHost || !dbUser || !dbPassword) continue;
+            if (companyConfigs.has(companyId)) continue;
+
+            const h = parseHostString(dbHost);
+            const config: CompanyDBConfig = {
+                id: companyId,
+                name: process.env[`COMPANY${i}_NAME`] ?? `Company ${companyId}`,
+                host: h.server,
+                user: dbUser,
+                password: dbPassword,
+                database: dbName,
+                port: h.port,
+                instance: h.instance,
+                rawHost: dbHost,
+            };
+            companyConfigs.set(companyId, config);
+            companyConfigsByDBName.set(dbName, config);
+            dbNameMapping.set(dbName, companyId);
+        }
     }
-    console.log(`📊 Total companies loaded: ${companyConfigs.size}`);
+
+    // Fallback: parse process.env.DB_NAME_MAPPING if present
+    if (process.env.DB_NAME_MAPPING) {
+        const pairs = process.env.DB_NAME_MAPPING.split(',');
+        for (const pair of pairs) {
+            const [db, id] = pair.split('=');
+            if (db && id && !dbNameMapping.has(db.trim())) {
+                dbNameMapping.set(db.trim(), parseInt(id.trim(), 10));
+            }
+        }
+    }
+
 }
 
 loadCompanyConfigurations();
@@ -252,8 +362,48 @@ export function getCompanyConfig(companyId: number): CompanyDBConfig | null {
     return companyConfigs.get(companyId) ?? null;
 }
 
+export function getAllCompanyIds(): number[] {
+    return Array.from(companyConfigs.keys());
+}
+
+export function isCompanyConfigured(companyId: number): boolean {
+    return companyConfigs.has(companyId);
+}
+
+export function getAllCompanyConfigs(): CompanyDBConfig[] {
+    return Array.from(companyConfigs.values());
+}
+
+export function getCompanyRawConfig(companyId: number): {
+    id: number;
+    name: string;
+    rawHost: string;
+    user: string;
+    password: string;
+    database: string;
+} | null {
+    const c = companyConfigs.get(companyId);
+    if (!c) return null;
+    return {
+        id: c.id,
+        name: c.name,
+        rawHost: c.rawHost || (c.instance ? `${c.host}\\${c.instance}${c.port ? `,${c.port}` : ''}` : (c.port ? `${c.host},${c.port}` : c.host)),
+        user: c.user,
+        password: c.password,
+        database: c.database,
+    };
+}
+
 export function getCompanyConfigByDBName(dbName: string): CompanyDBConfig | null {
     return companyConfigsByDBName.get(dbName) ?? null;
+}
+
+export function getDbNameMapping(): Record<string, number> {
+    const obj: Record<string, number> = {};
+    for (const [db, id] of dbNameMapping.entries()) {
+        obj[db] = id;
+    }
+    return obj;
 }
 
 export async function getCompanyDatabase(identifier: number | string): Promise<Sequelize> {
@@ -272,13 +422,20 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
     }
 
     if (!config && typeof identifier === 'number') {
-        const mappingStr = process.env.DB_NAME_MAPPING || '';
-        const pairs = mappingStr.split(',');
-        for (const pair of pairs) {
-            const [db, id] = pair.split('=');
-            if (parseInt(id, 10) === identifier) {
-                config = getCompanyConfigByDBName(db.trim());
+        for (const [db, id] of dbNameMapping.entries()) {
+            if (id === identifier) {
+                config = getCompanyConfigByDBName(db);
                 if (config) break;
+            }
+        }
+        if (!config && process.env.DB_NAME_MAPPING) {
+            const pairs = process.env.DB_NAME_MAPPING.split(',');
+            for (const pair of pairs) {
+                const [db, id] = pair.split('=');
+                if (parseInt(id, 10) === identifier) {
+                    config = getCompanyConfigByDBName(db.trim());
+                    if (config) break;
+                }
             }
         }
     }
@@ -289,7 +446,6 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
     const cacheKey = `company_${config.id}`;
     if (companyConnections.has(cacheKey)) {
         // Return cached connection directly — no authenticate() ping to save round-trip latency
-        console.log(`♻️ Reusing connection: ${config.database}`);
         return companyConnections.get(cacheKey)!;
     }
     const usePort = config.port ?? (config.instance ? undefined : 1433);
@@ -323,7 +479,6 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
     });
     try {
         await seq.authenticate();
-        console.log(`✅ Connected: ${config.database} (${config.name})`);
         companyConnections.set(cacheKey, seq);
         return seq;
     } catch (error: any) {
@@ -416,7 +571,6 @@ export function storeTokenSession(
         }
     } catch {}
 
-    console.log(`📝 Session stored — User: ${userId}, LocalUser: ${localUserId}, Company: ${companyId} (${companyName}), DB: ${dbName}`);
 }
 
 export function verifyTokenSession(token: string): TokenSession | null {
@@ -425,7 +579,6 @@ export function verifyTokenSession(token: string): TokenSession | null {
     const hoursSinceCreation = (Date.now() - s.createdAt.getTime()) / (1000 * 60 * 60);
     if (hoursSinceCreation > 24) {
         removeTokenSession(token);
-        console.log('⏰ Session expired');
         return null;
     }
     return s;
@@ -451,7 +604,6 @@ export function removeTokenSession(token: string): void {
         }
     } catch {}
 
-    console.log('🗑️ Session removed');
 }
 
 // Connection Stats
@@ -498,7 +650,6 @@ export const getCompanySqlConnection = async (companyId: number | string): Promi
 
     const usePort = config.port ?? (config.instance ? undefined : 1433);
 
-    console.log(`🔌 Creating SQL connection for company: ${config.name} (${config.database})`);
 
     const sqlConfig: sql.config = {
         server: config.host,
@@ -524,7 +675,6 @@ export const getCompanySqlConnection = async (companyId: number | string): Promi
     try {
         const pool = await sql.connect(sqlConfig);
         sqlConnectionPools.set(key, pool);
-        console.log(`✅ SQL Connection created for company: ${config.name}`);
         return pool;
     } catch (error) {
         console.error(`❌ Failed to connect to company ${config.name}:`, error);
@@ -534,13 +684,11 @@ export const getCompanySqlConnection = async (companyId: number | string): Promi
 
 // Close all company connections
 export async function closeAllCompanyConnections(): Promise<void> {
-    console.log('🛑 Closing all company connections…');
     
     // Close Sequelize connections
     for (const [key, conn] of companyConnections) {
         try {
             await conn.close();
-            console.log(`   Closed Sequelize: ${key}`);
         } catch (err) {
             console.error(`   Error closing ${key}:`, err);
         }
@@ -551,7 +699,6 @@ export async function closeAllCompanyConnections(): Promise<void> {
     for (const [key, pool] of sqlConnectionPools) {
         try {
             await pool.close();
-            console.log(`   Closed SQL Pool: ${key}`);
         } catch (err) {
             console.error(`   Error closing SQL pool ${key}:`, err);
         }
@@ -563,13 +710,11 @@ export async function closeAllCompanyConnections(): Promise<void> {
         try {
             await defaultSqlPool.close();
             defaultSqlPool = null;
-            console.log('   Closed Default SQL Pool');
         } catch (err) {
             console.error('   Error closing default SQL pool:', err);
         }
     }
     
-    console.log('✅ All connections closed');
 }
 
 export const sequelize = getDefaultConnection();

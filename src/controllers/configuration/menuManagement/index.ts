@@ -5,6 +5,7 @@ import {
     getDefaultConnection,
     getUserDatabaseConnectionFromToken,
     getCompanyIdFromToken,
+    getCompanyRawConfig as getDBCompanyRawConfig,
 } from '../../../config/database.config';
 import dotenv from 'dotenv';
 
@@ -97,7 +98,6 @@ const companyRawConfigs: Map<number, CompanyRawConfig> = new Map();
 
 // Load raw company configurations from environment
 const loadRawCompanyConfigurations = (): void => {
-    console.log('📂 Loading raw company configurations from .env...');
 
     const companyIndices = new Set<number>();
     for (const key of Object.keys(process.env)) {
@@ -127,11 +127,8 @@ const loadRawCompanyConfigurations = (): void => {
         };
 
         companyRawConfigs.set(companyId, config);
-        console.log(`✅ Loaded raw config for Company ${companyId}: ${config.name}`);
-        console.log(`   Raw Host: ${config.rawHost}`);
     }
 
-    console.log(`📊 Total raw companies loaded: ${companyRawConfigs.size}`);
 };
 
 loadRawCompanyConfigurations();
@@ -293,7 +290,7 @@ const buildDialectOptions = (instance?: string, explicitPort?: number): any => {
 // ─── Helper: get company raw config by ID ─────────────────────────────────────
 
 const getCompanyRawConfig = (companyId: number): CompanyRawConfig | null => {
-    return companyRawConfigs.get(companyId) ?? null;
+    return companyRawConfigs.get(companyId) ?? (getDBCompanyRawConfig(companyId) as CompanyRawConfig | null) ?? null;
 };
 
 // ─── Helper: get User Portal connection via COMPANY HOST using RAW config ──────
@@ -305,49 +302,29 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
         // Get company ID from token
         const companyId = getCompanyIdFromToken(token);
         if (!companyId) {
-            console.log('No company ID found in token, using default connection');
             return getDefaultConnection();
         }
 
         // Check cache
         if (userPortalConnections.has(companyId)) {
             const cached = userPortalConnections.get(companyId)!;
-            console.log(`♻️ Reusing User Portal connection for company ${companyId}`);
             return cached;
         }
 
         // Get raw company configuration
         const companyRawConfig = getCompanyRawConfig(companyId);
         if (!companyRawConfig) {
-            console.log(`No raw company config found for ID ${companyId}, using default connection`);
             return getDefaultConnection();
         }
 
-        console.log(`Company ${companyId} raw config:`, {
-            rawHost: companyRawConfig.rawHost,
-            database: companyRawConfig.database,
-            user: companyRawConfig.user
-        });
 
         // Parse raw host string
         const h = parseRawHostString(companyRawConfig.rawHost);
 
-        console.log(`Parsed host:`, {
-            server: h.server,
-            port: h.port,
-            instance: h.instance
-        });
 
         // Determine the port to use
         const usePort = h.port !== undefined ? h.port : (h.instance ? undefined : 1433);
 
-        console.log(`Connection settings for User_Portal:`, {
-            server: h.server,
-            port: usePort,
-            instance: h.instance,
-            database: 'User_Portal',
-            user: companyRawConfig.user
-        });
 
         const baseOpts = buildDialectOptions(h.instance, h.port);
         const userPortalConnection = new Sequelize({
@@ -387,7 +364,6 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
         });
 
         await userPortalConnection.authenticate();
-        console.log(`✅ Connected to User_Portal on company host: ${companyRawConfig.rawHost}`);
 
         // Cache the connection
         userPortalConnections.set(companyId, userPortalConnection);
@@ -395,7 +371,6 @@ const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequel
 
     } catch (error) {
         console.error('Error connecting to User_Portal via company host:', error);
-        console.log('⚠️ Falling back to default User Portal connection');
         return getDefaultConnection();
     }
 };

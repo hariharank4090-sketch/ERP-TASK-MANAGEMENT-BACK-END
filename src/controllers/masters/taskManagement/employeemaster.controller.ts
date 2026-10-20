@@ -330,7 +330,6 @@ export const getAllEmployees = async (req: Request, res: Response) => {
             const localUserId = getLocalUserIdForCurrentCompany(req);
             if (localUserId != null) {
                 whereClause.User_Mgt_Id = localUserId;
-                console.log(`🔒 UserTypeId ${permissions.userTypeId} — filtering by User_Mgt_Id = ${localUserId}`);
             } else {
                 console.warn('⚠️  localUserId not found in session — returning empty result set');
                 return res.status(200).json({
@@ -348,7 +347,6 @@ export const getAllEmployees = async (req: Request, res: Response) => {
                 });
             }
         } else {
-            console.log(`👑 Admin/Manager access (UserTypeId ${permissions.userTypeId}) — returning all employees for this company`);
         }
 
         // Apply filters

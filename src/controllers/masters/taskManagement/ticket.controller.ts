@@ -8,7 +8,7 @@ const toBigInt = (val: any): string => {
     return String(BigInt(val));
 };
 
-const USER_PORTAL_DB = process.env.USERPORTALDB || "User_Portal";
+const USER_PORTAL_DB = process.env.DATABASE || "User_Portal";
 const FULL_TABLE_NAME = `[${USER_PORTAL_DB}].[dbo].[tbl_Ticket_Gen_Info]`;
 
 export const getTickets = async (req: Request, res: Response) => {

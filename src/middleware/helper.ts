@@ -166,7 +166,6 @@ export const filterableText = (text: string): string => {
         const txt = trimText(String(text), ' ').toLowerCase();
         return txt
     } catch (e) {
-        console.log('Error while convert to filterable text:', e);
         return '';
     }
 }

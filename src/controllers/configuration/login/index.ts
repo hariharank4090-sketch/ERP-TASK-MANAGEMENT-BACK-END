@@ -1,6 +1,8 @@
 // src/controllers/configuration/login.controller.ts
 import { Request, Response } from 'express';
 import crypto from 'crypto';
+import CryptoJS from 'crypto-js';
+import JWT_SECRET from '../../../config/jwtSecret';
 import {
     getDefaultConnection,
     storeTokenSession,
@@ -9,6 +11,8 @@ import {
     removeTokenSession,
     verifyTokenSession,
     getTokenForCompany,
+    getAllCompanyIds,
+    isCompanyConfigured,
 } from '../../../config/database.config';
 import { initUserModel } from '../../../models/masters/users/users.model';
 import { initCompanyModel } from '../../../models/masters/company/company.model';
@@ -42,7 +46,7 @@ const generateToken = (): string => {
  */
 export const login = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const { username, password, companyId } = req.body;
+        const { username, password } = req.body;
 
         if (!username || !password) {
             return res.status(400).json({
@@ -53,7 +57,30 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             });
         }
 
-        console.log('🔐 Login attempt:', username);
+        const configuredCompanyIds = getAllCompanyIds();
+        if (configuredCompanyIds.length === 0) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'No company configurations loaded',
+                data: null,
+                others: {},
+            });
+        }
+
+        const rawCompanyId = req.body.companyId || req.body.Company_Id || req.body.company_id || req.body.CompanyId;
+        const parsedCompanyId = rawCompanyId && !isNaN(parseInt(rawCompanyId.toString(), 10))
+            ? parseInt(rawCompanyId.toString(), 10)
+            : undefined;
+
+        // If a specific company was requested, verify it is present in companies.json
+        if (parsedCompanyId !== undefined && !isCompanyConfigured(parsedCompanyId)) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Please select correct company',
+                data: null,
+                others: {},
+            });
+        }
 
         const sequelize = getDefaultConnection();
         const UserModel = initUserModel(sequelize);
@@ -67,12 +94,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             });
         }
 
-        const rawCompanyId = req.body.companyId || req.body.Company_Id || req.body.company_id || req.body.CompanyId;
-        const parsedCompanyId = rawCompanyId && !isNaN(parseInt(rawCompanyId.toString(), 10))
-            ? parseInt(rawCompanyId.toString(), 10)
-            : undefined;
-
-        // ── Step 1: Validate credentials against the first matching user row ──
+        // ── Step 1: Validate credentials against the first matching user row in configured companies ──
         const isNumericUsername = /^\d+$/.test(username.toString());
         let whereStr = "(u.UserName = :username";
         if (isNumericUsername) {
@@ -84,6 +106,9 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         if (parsedCompanyId && parsedCompanyId > 0) {
             whereStr += " AND u.Company_Id = :companyId";
             replacements.companyId = parsedCompanyId;
+        } else {
+            whereStr += " AND u.Company_Id IN (:configuredCompanyIds)";
+            replacements.configuredCompanyIds = configuredCompanyIds;
         }
 
         const [users] = await sequelize.query(`
@@ -120,18 +145,17 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             });
         }
 
-        // ── Step 2: Fetch ALL companies this username has access to ───────────
-        // Query using user.UserName to ensure we fetch all companies associated with the resolved username
+        // ── Step 2: Fetch ALL companies this username has access to (configured only) ───────────
         const [allUserRows] = await sequelize.query(`
             SELECT 
                 u.Global_User_ID, u.Local_User_ID, u.Company_Id, u.Autheticate_Id, u.UserTypeId, u.Password,
                 c.Local_Comp_Id, c.Company_Name, c.DB_Name
             FROM tbl_Users u
             LEFT JOIN tbl_Company c ON u.Company_Id = c.Local_Comp_Id
-            WHERE u.UserName = :username AND u.UDel_Flag = 0
-        `, { replacements: { username: user.UserName } }) as any[];
+            WHERE u.UserName = :username AND u.UDel_Flag = 0 AND u.Company_Id IN (:configuredCompanyIds)
+        `, { replacements: { username: user.UserName, configuredCompanyIds } }) as any[];
 
-        // ── Step 3: Generate / reuse one token per company ────────────────────
+        // ── Step 3: Generate / reuse one token per configured company ────────────────────
         const companiesWithTokens: Array<{
             companyId: number;
             companyName: string;
@@ -149,10 +173,12 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             const rowLocalUserId: number | null = row.Local_User_ID;
             const rowUserTypeId: number | null = row.UserTypeId ?? null;
             const envConfig = rowCompanyId ? getCompanyConfig(rowCompanyId) : null;
-            const rowCompanyName: string = envConfig?.name || row.Company_Name || '';
-            const rowDbName: string = envConfig?.database || row.DB_Name || '';
 
-            if (!rowCompanyId || !rowDbName) return null;
+            // Strictly require company to be configured in companies.json
+            if (!rowCompanyId || !envConfig) return null;
+
+            const rowCompanyName: string = envConfig.name;
+            const rowDbName: string = envConfig.database;
 
             // Verify if the password matches for this specific company row
             const isRowPasswordValid = await verifyPasswordCombined(password, row.Password ?? '');
@@ -201,7 +227,16 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             if (res) companiesWithTokens.push(res);
         });
 
-        // ── Step 4: Determine the "current" company for this login ────────────
+        // ── Step 4: Ensure at least one configured company is available ────────────
+        if (companiesWithTokens.length === 0) {
+            return res.status(401).json({
+                status: 'error',
+                message: parsedCompanyId ? 'Please select correct company' : 'Invalid username or password',
+                data: null,
+                others: {},
+            });
+        }
+
         let currentEntry = companiesWithTokens.find(c => c.companyId === (parsedCompanyId ?? user.Company_Id));
         if (!currentEntry && companiesWithTokens.length > 0) {
             currentEntry = companiesWithTokens[0];
@@ -215,56 +250,35 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             }
         }
 
-        if (!currentEntry) {
-            const fallbackToken = user.Autheticate_Id ?? generateToken();
-            storeTokenSession(fallbackToken, user.Global_User_ID, user.Local_User_ID, 0, '', '', user);
-            await UserModel.update(
-                { Autheticate_Id: fallbackToken },
-                { 
-                    where: { Global_User_ID: user.Global_User_ID }
-                }
-            );
-
-            return res.status(200).json({
-                status: 'success',
-                message: 'Login successful',
-                data: {
-                    user: {
-                        Global_User_ID: user.Global_User_ID,
-                        Local_User_ID: user.Local_User_ID,
-                        Name: user.Name,
-                        UserName: user.UserName,
-                        UserTypeId: user.UserTypeId,
-                    },
-                    currentCompany: [],
-                    serverTime: new Date().toISOString(),
-                },
-                others: {},
-            });
-        }
-
         // ── Step 5: Build response ─────────────────────────────────────────────
+        const companyList = companiesWithTokens.map(c => ({
+            companyId:   c.companyId,
+            companyName: c.companyName,
+            dbName:      c.dbName,
+            dbConnected: c.dbConnected,
+            token:       c.token,
+            UserTypeId:  c.UserTypeId,
+            Local_User_ID: c.Local_User_ID,
+            Global_User_ID: c.Global_User_ID,
+        }));
+
+        const encryptedCompany = CryptoJS.AES.encrypt(
+            JSON.stringify(companyList),
+            JWT_SECRET
+        ).toString();
+
         return res.status(200).json({
             status: 'success',
             message: 'Login successful',
             data: {
                 user: {
-                    Global_User_ID: user.Global_User_ID,
-                    Local_User_ID: user.Local_User_ID,
+                    Global_User_ID: currentEntry?.Global_User_ID ?? user.Global_User_ID,
+                    Local_User_ID: currentEntry?.Local_User_ID ?? user.Local_User_ID,
                     Name: user.Name,
                     UserName: user.UserName,
-                    UserTypeId: user.UserTypeId,
+                    UserTypeId: currentEntry?.UserTypeId ?? user.UserTypeId,
                 },
-                currentCompany: companiesWithTokens.map(c => ({
-                    companyId:   c.companyId,
-                    companyName: c.companyName,
-                    dbName:      c.dbName,
-                    dbConnected: c.dbConnected,
-                    token:       c.token,
-                    UserTypeId:  c.UserTypeId,
-                    Local_User_ID: c.Local_User_ID,
-                    Global_User_ID: c.Global_User_ID,
-                })),
+                currentCompany: encryptedCompany,
                 serverTime: new Date().toISOString(),
             },
             others: {},
@@ -394,7 +408,6 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
             const connection = await getCompanyDatabase(companyConfig.id);
             if (connection) dbConnected = true;
         } catch {
-            console.log(`⚠️ Could not connect to ${companyConfig.name}, will retry on first use`);
         }
 
         return res.status(200).json({
@@ -522,6 +535,7 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
             as: 'Company',
         });
 
+        const configuredCompanyIds = getAllCompanyIds();
         const userCompanies = await UserModel.unscoped().findAll({
             attributes: ['Global_User_ID', 'Local_User_ID', 'Company_Id', 'Autheticate_Id', 'UserTypeId'],
             include: [{
@@ -529,18 +543,22 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
                 attributes: ['Local_Comp_Id', 'Company_Name', 'DB_Name'],
                 as: 'Company',
             }],
-            where: { UserName: user.UserName, UDel_Flag: 0 },
+            where: {
+                UserName: user.UserName,
+                UDel_Flag: 0,
+                Company_Id: configuredCompanyIds,
+            },
         });
 
-        // Build currentCompany as array — same shape as login response
+        // Build currentCompany as array — only companies configured in companies.json
         const currentCompany = userCompanies
             .map(u => {
-                const uData = u.get({ plain: true }) as any;
                 const envConfig = u.Company_Id ? getCompanyConfig(u.Company_Id) : null;
+                if (!envConfig) return null;
                 return {
                     companyId:   u.Company_Id,
-                    companyName: envConfig?.name || uData.Company?.Company_Name || '',
-                    dbName:      envConfig?.database || uData.Company?.DB_Name || '',
+                    companyName: envConfig.name,
+                    dbName:      envConfig.database,
                     token:       u.Autheticate_Id ?? '',    // each company's own token
                     dbConnected: true,
                     UserTypeId:  u.UserTypeId,
@@ -548,7 +566,7 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
                     Global_User_ID: u.Global_User_ID,
                 };
             })
-            .filter(c => c.companyId);
+            .filter((c): c is NonNullable<typeof c> => c !== null);
 
         return res.status(200).json({
             status: 'success',
@@ -670,7 +688,6 @@ export const changePassword = async (req: Request, res: Response): Promise<Respo
                         }
                     }
                 );
-                console.log(`✅ Synced password update for username ${user.UserName} to company database`);
             } catch (companyDbErr) {
                 console.error('⚠️ Failed to sync password to company database:', companyDbErr);
             }

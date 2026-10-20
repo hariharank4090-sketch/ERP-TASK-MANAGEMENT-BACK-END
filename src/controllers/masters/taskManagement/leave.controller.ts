@@ -95,8 +95,10 @@ export const getLeaveList = async (req: Request, res: Response) => {
 
     const whereClause: any = {};
 
-    if (UserId && (UserTypeId === 3 || !UserTypeId)) {
-      whereClause.User_Id = UserId;
+    const user = (req as any).user;
+    const isStaff = ![0, 1].includes(user?.UserTypeId);
+    if (isStaff) {
+      whereClause.User_Id = user?.Global_User_ID;
     } else if (UserId && UserId !== 0) {
       whereClause.User_Id = UserId;
     }
