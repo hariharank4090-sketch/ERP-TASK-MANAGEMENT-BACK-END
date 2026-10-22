@@ -75,7 +75,7 @@ export function servError(
     const req: Request | undefined = res.req;
 
     const safeBody: Record<string, any> = { ...(req?.body ?? {}) };
-    for (const key of ['password', 'token', 'otp']) {
+    for (const key of ['password', 'Password', 'oldPassword', 'newPassword', 'token', 'otp']) {
         if (key in safeBody) safeBody[key] = '[redacted]';
     }
 

@@ -26,6 +26,21 @@ const generateToken = (): string => {
     return `${ts}${random}`.substring(0, 48);
 };
 
+// ─── AES Decryption Helper for Hidden Network Payloads ───────────────────────
+
+const tryDecryptText = (val: any): string => {
+    if (!val || typeof val !== 'string') return val;
+    const keys = [process.env.passwordKey, JWT_SECRET].filter(Boolean) as string[];
+    for (const key of keys) {
+        try {
+            const bytes = CryptoJS.AES.decrypt(val, key);
+            const dec = bytes.toString(CryptoJS.enc.Utf8);
+            if (dec && dec.length > 0) return dec;
+        } catch {}
+    }
+    return val;
+};
+
 // ─── login ────────────────────────────────────────────────────────────────────
 /**
  * POST /api/configuration/login
@@ -46,7 +61,25 @@ const generateToken = (): string => {
  */
 export const login = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const { username, password } = req.body;
+        let body = req.body || {};
+
+        // Support encrypted payload envelope: { payload: "..." } or { data: "..." }
+        if (!body.username && !body.password && (body.payload || body.data || typeof body === 'string')) {
+            const rawCipher = body.payload || body.data || body;
+            const decryptedRaw = tryDecryptText(rawCipher);
+            if (decryptedRaw && typeof decryptedRaw === 'string') {
+                try {
+                    body = JSON.parse(decryptedRaw);
+                } catch {}
+            }
+        }
+
+        let username = body.username ?? body.UserName ?? body.user;
+        let password = body.password ?? body.Password;
+
+        // Automatically decrypt username and password if sent encrypted from frontend
+        username = tryDecryptText(username);
+        password = tryDecryptText(password);
 
         if (!username || !password) {
             return res.status(400).json({
@@ -605,7 +638,9 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
  */
 export const changePassword = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const { userId, oldPassword, newPassword } = req.body;
+        let { userId, oldPassword, newPassword } = req.body;
+        oldPassword = tryDecryptText(oldPassword);
+        newPassword = tryDecryptText(newPassword);
 
         if (!userId || !oldPassword || !newPassword) {
             return res.status(400).json({
