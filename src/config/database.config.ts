@@ -31,6 +31,9 @@ export interface TokenSession {
 
 let defaultConnection: Sequelize | null = null;
 let defaultSqlPool: sql.ConnectionPool | null = null;
+let defaultSqlConnecting: Promise<sql.ConnectionPool> | null = null;
+const sqlConnecting = new Map<string, Promise<sql.ConnectionPool>>();
+const companyConnecting = new Map<string, Promise<Sequelize>>();
 
 // Cache for SQL connection pools
 const sqlConnectionPools: Map<string, sql.ConnectionPool> = new Map();
@@ -96,7 +99,7 @@ export const getDefaultConnection = (): Sequelize => {
             database: process.env.DATABASE,
             logging: false,
             dialectOptions: buildDialectOptions(h.instance, h.port),
-            pool: { max: 50, min: 0, acquire: 60000, idle: 1000, evict: 1000 },
+            pool: { max: 50, min: 0, acquire: 60000, idle: 60000, evict: 1000 },
             retry: {
                 match: [
                     /ECONNRESET/,
@@ -128,6 +131,7 @@ export const getDefaultSqlConnection = async (): Promise<sql.ConnectionPool> => 
     if (defaultSqlPool && defaultSqlPool.connected) {
         return defaultSqlPool;
     }
+    if (defaultSqlConnecting) return defaultSqlConnecting;
 
     const rawHost = process.env.DB_HOST || process.env.SERVER || 'localhost';
     const h = parseHostString(rawHost);
@@ -154,8 +158,17 @@ export const getDefaultSqlConnection = async (): Promise<sql.ConnectionPool> => 
         }
     };
 
-    defaultSqlPool = await sql.connect(config);
-    return defaultSqlPool;
+    const pool = new sql.ConnectionPool(config);
+    defaultSqlConnecting = pool.connect();
+    try {
+        defaultSqlPool = await defaultSqlConnecting;
+        return defaultSqlPool;
+    } catch (error) {
+        await pool.close().catch(() => {});
+        throw error;
+    } finally {
+        defaultSqlConnecting = null;
+    }
 };
 
 const companyConfigs: Map<number, CompanyDBConfig> = new Map();
@@ -448,6 +461,8 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
         // Return cached connection directly — no authenticate() ping to save round-trip latency
         return companyConnections.get(cacheKey)!;
     }
+    const pending = companyConnecting.get(cacheKey);
+    if (pending) return pending;
     const usePort = config.port ?? (config.instance ? undefined : 1433);
     const seq = new Sequelize({
         dialect: 'mssql',
@@ -458,7 +473,7 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
         database: config.database,
         logging: false,
         dialectOptions: buildDialectOptions(config.instance, config.port),
-        pool: { max: 50, min: 0, acquire: 60000, idle: 1000, evict: 1000 },
+        pool: { max: 50, min: 0, acquire: 60000, idle: 60000, evict: 1000 },
         retry: {
             match: [
                 /ECONNRESET/,
@@ -477,13 +492,19 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
         },
         isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED,
     });
-    try {
-        await seq.authenticate();
+    const connecting = seq.authenticate().then(() => {
         companyConnections.set(cacheKey, seq);
         return seq;
+    });
+    companyConnecting.set(cacheKey, connecting);
+    try {
+        return await connecting;
     } catch (error: any) {
+        await seq.close().catch(() => {});
         console.error(`❌ Connection FAILED: ${config.database}`, error.message);
         throw error;
+    } finally {
+        companyConnecting.delete(cacheKey);
     }
 }
 
@@ -626,17 +647,6 @@ export function getConnectionStats() {
 
 // Cache for SQL connection pools
 export const getCompanySqlConnection = async (companyId: number | string): Promise<sql.ConnectionPool> => {
-    const key = `company_${companyId}`;
-
-    // Return cached pool directly — no ping to save round-trip latency
-    if (sqlConnectionPools.has(key)) {
-        const pool = sqlConnectionPools.get(key)!;
-        if (pool.connected) {
-            return pool;
-        }
-        sqlConnectionPools.delete(key);
-    }
-
     let config: CompanyDBConfig | null;
     if (typeof companyId === 'number') {
         config = getCompanyConfig(companyId);
@@ -647,6 +657,12 @@ export const getCompanySqlConnection = async (companyId: number | string): Promi
     if (!config) {
         throw new Error(`No configuration found for company: ${companyId}`);
     }
+    const key = `company_${config.id}`;
+    const cached = sqlConnectionPools.get(key);
+    if (cached?.connected) return cached;
+    const pending = sqlConnecting.get(key);
+    if (pending) return pending;
+    sqlConnectionPools.delete(key);
 
     const usePort = config.port ?? (config.instance ? undefined : 1433);
 
@@ -672,18 +688,29 @@ export const getCompanySqlConnection = async (companyId: number | string): Promi
         }
     };
 
+    const pool = new sql.ConnectionPool(sqlConfig);
+    const connecting = pool.connect();
+    sqlConnecting.set(key, connecting);
     try {
-        const pool = await sql.connect(sqlConfig);
+        await connecting;
         sqlConnectionPools.set(key, pool);
         return pool;
     } catch (error) {
+        await pool.close().catch(() => {});
         console.error(`❌ Failed to connect to company ${config.name}:`, error);
         throw error;
+    } finally {
+        sqlConnecting.delete(key);
     }
 };
 
 // Close all company connections
 export async function closeAllCompanyConnections(): Promise<void> {
+    await Promise.allSettled([
+        ...companyConnecting.values(),
+        ...sqlConnecting.values(),
+        ...(defaultSqlConnecting ? [defaultSqlConnecting] : []),
+    ]);
     
     // Close Sequelize connections
     for (const [key, conn] of companyConnections) {

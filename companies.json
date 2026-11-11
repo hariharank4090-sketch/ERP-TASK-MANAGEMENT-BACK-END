@@ -6,7 +6,7 @@
       "host": "122.165.240.65\\SQL_2019,1435",
       "user": "smtuser",
       "password": "sas",
-      "database": "ERP_LIVE_DB_SMT"
+      "database": "ERP_DB_TEST_25_09_2026"
     },
     {
       "id": 2,
@@ -14,41 +14,17 @@
       "host": "103.14.120.9",
       "user": "SMT_ADMIN_Live_User",
       "password": "K18R=7MxWT",
-      "database": "ERP_LIVE_DB_SFI"
-    },
-    {
-      "id": 3,
-      "name": "PUKAL TECHNLOGIES",
-      "host": "103.14.120.9",
-      "user": "SMT_ADMIN_Live_User",
-      "password": "K18R=7MxWT",
-      "database": "ERP_LIVE_DB_PUKAL_TECH"
-    },
-    {
-      "id": 4,
-      "name": "PUKAL FOODS",
-      "host": "103.14.120.9",
-      "user": "SMT_ADMIN_Live_User",
-      "password": "K18R=7MxWT",
-      "database": "ERP_LIVE_DB_PUKAL_FOODS"
-    },
-    {
-      "id": 6,
-      "name": "SMT OIL STORE",
-      "host": "103.14.120.9",
-      "user": "SMT_ADMIN_Live_User",
-      "password": "K18R=7MxWT",
-      "database": "ERP_LIVE_DB_SMT_OIL"
+      "database": "ERP_DB_SFI_TEST"
     }
+
   ],
 
 
   
   "dbNameMapping": {
     "ERP_LIVE_DB_SMT": 1,
-    "ERP_LIVE_DB_SFI": 2,
-    "ERP_LIVE_DB_PUKAL_TECH": 3,
-    "ERP_LIVE_DB_PUKAL_FOODS": 4,
-    "ERP_LIVE_DB_SMT_OIL": 6
+    "ERP_LIVE_DB_SFI": 2
+
+   
   }
 }

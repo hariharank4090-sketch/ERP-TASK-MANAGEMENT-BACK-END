@@ -30,6 +30,94 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan(':method :url :status :response-time ms'));
 
 createUploadFolders();
+const uploadsDirPath = path.resolve(process.cwd(), 'uploads');
+const externalTicketingUploadsPath = path.resolve('D:/ticketing system/Ticketing_system_backend/uploads');
+
+const MIME_BY_EXT: Record<string, string> = {
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.oga': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+    '.aac': 'audio/aac',
+    '.weba': 'audio/webm',
+    '.flac': 'audio/flac',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain; charset=utf-8',
+    '.jpeg': 'image/jpeg',
+    '.jpg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+};
+
+const sendTicketMediaFile = (res: express.Response, filePath: string, requestedExt?: string) => {
+    const actualExt = path.extname(filePath).toLowerCase();
+    const mimeType = MIME_BY_EXT[actualExt] || (requestedExt ? MIME_BY_EXT[requestedExt] : undefined);
+    if (mimeType) {
+        res.setHeader('Content-Type', mimeType);
+    }
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Disposition', 'inline');
+    return res.sendFile(filePath);
+};
+
+const serveTicketUploadFallback: express.RequestHandler = (req, res, next) => {
+    const rawFile = req.params.filename || '';
+    const safeFile = path.basename(rawFile);
+    if (!safeFile) return next();
+
+    const candidateDirs = [
+        path.join(uploadsDirPath, 'Tickets'),
+        path.join(uploadsDirPath, 'tickets'),
+        path.join(externalTicketingUploadsPath, 'Tickets'),
+    ];
+
+    const ext = path.extname(safeFile).toLowerCase();
+
+    for (const dir of candidateDirs) {
+        const exactPath = path.join(dir, safeFile);
+        if (fs.existsSync(exactPath) && fs.statSync(exactPath).isFile()) {
+            return sendTicketMediaFile(res, exactPath, ext);
+        }
+    }
+
+    // Fallback for shared DB ticket attachments (TCK_*) when exact file was uploaded on another machine
+    if (ext) {
+        const isAudioExt = /^\.(mp3|wav|ogg|oga|m4a|aac|weba|flac)$/i.test(ext);
+        const isVideoExt = /^\.(mp4|webm|mov|mkv|avi|wmv)$/i.test(ext);
+        const isImageExt = /^\.(jpeg|jpg|png|gif|webp|bmp)$/i.test(ext);
+
+        for (const dir of candidateDirs) {
+            if (!fs.existsSync(dir)) continue;
+            const files = fs.readdirSync(dir);
+            let match = files.find((f) => path.extname(f).toLowerCase() === ext);
+            if (!match && isAudioExt) {
+                match = files.find((f) => /^\.(mp3|wav|ogg|oga|m4a|aac|weba|flac)$/i.test(path.extname(f)));
+            } else if (!match && isVideoExt) {
+                match = files.find((f) => /^\.(mp4|webm|mov)$/i.test(path.extname(f)));
+            } else if (!match && isImageExt) {
+                match = files.find((f) => /^\.(jpeg|jpg|png|gif|webp)$/i.test(path.extname(f)));
+            }
+            if (match) {
+                return sendTicketMediaFile(res, path.join(dir, match), ext);
+            }
+        }
+    }
+
+    return next();
+};
+
+app.get(['/uploads/Tickets/:filename', '/uploads/tickets/:filename', '/api/uploads/Tickets/:filename', '/api/uploads/tickets/:filename'], serveTicketUploadFallback);
+app.use('/uploads', express.static(uploadsDirPath));
+app.use('/api/uploads', express.static(uploadsDirPath));
+if (fs.existsSync(externalTicketingUploadsPath)) {
+    app.use('/uploads', express.static(externalTicketingUploadsPath));
+    app.use('/api/uploads', express.static(externalTicketingUploadsPath));
+}
 
 // ─── DB boot ─────────────────────────────────────────────────────────────────
 
@@ -102,11 +190,11 @@ if (hasFrontend) {
     // ─── CRITICAL FIX: Catch-all route for client-side routing ───
     // This must be AFTER all API routes and static file middleware
     app.get('*', (req, res) => {
-        // Skip API routes that might have been missed
-        if (req.path.startsWith('/api/') || req.path.startsWith('/api-docs') || req.path === '/health') {
+        // Skip API routes and missing uploads that might have been missed
+        if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/api-docs') || req.path === '/health') {
             return res.status(404).json({
                 status: 'error',
-                message: `API endpoint ${req.path} not found`
+                message: `Endpoint ${req.path} not found`
             });
         }
 

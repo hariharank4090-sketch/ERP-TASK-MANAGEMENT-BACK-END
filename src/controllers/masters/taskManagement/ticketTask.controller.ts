@@ -68,12 +68,9 @@ const handleForbiddenError = (res: Response, customMessage?: string) => {
 const checkUserPermission = (req: Request, requiredPermission?: string): boolean => {
     const user = (req as any).user;
     if (!user) return false;
-    if (user.UserTypeId === 0) return true;
+    if (Number(user.UserTypeId) === 0) return true;
     
-    if (requiredPermission === 'create' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) return false;
-    if (requiredPermission === 'update' && ![1, 2].includes(user.UserTypeId)) return false;
-    if (requiredPermission === 'delete' && user.UserTypeId !== 1) return false;
-    if (requiredPermission === 'view' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) return false;
+    if (requiredPermission === 'delete' && Number(user.UserTypeId) !== 1) return false;
     
     return true;
 };
@@ -97,7 +94,7 @@ export const getAllTicketTasks = async (req: Request, res: Response) => {
         
         const user = (req as any).user;
         const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id || user?.currentCompanyId;
-        if (currentCompanyId) {
+        if (currentCompanyId && Task_Id === undefined && Ticket_Id === undefined) {
             whereClause[Op.or] = [
                 { From_CompanyId: currentCompanyId },
                 { To_CompanyId: currentCompanyId }
@@ -189,6 +186,17 @@ export const createTicketTask = async (req: Request, res: Response) => {
         }
 
         const data = validation.data!;
+        const sanitizeSqlDate = (val: any): string | null => {
+            if (val === undefined || val === null) return null;
+            const s = String(val).trim();
+            if (!s) return null;
+            return s.replace('T', ' ').replace(/Z$/i, '').slice(0, 23);
+        };
+        data.Est_Sch_Start_Date = sanitizeSqlDate(data.Est_Sch_Start_Date);
+        data.Est_Sch_End_Date = sanitizeSqlDate(data.Est_Sch_End_Date);
+        data.ticket_acc_date = sanitizeSqlDate(data.ticket_acc_date);
+        data.tick_com_date = sanitizeSqlDate(data.tick_com_date);
+
         const user = (req as any).user;
         const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id || user?.currentCompanyId;
         if (currentCompanyId && !data.From_CompanyId) {
@@ -196,6 +204,23 @@ export const createTicketTask = async (req: Request, res: Response) => {
         }
 
         const TicketTaskModel = getTicketTaskModel(req);
+
+        try {
+            const [identityRows] = await sequelize.query(
+                `SELECT COLUMNPROPERTY(OBJECT_ID('tbl_Project_Ticket'), 'id', 'IsIdentity') AS isIdentity`,
+                { transaction }
+            ) as any[];
+            const isIdentity = Array.isArray(identityRows) && identityRows[0]?.isIdentity === 1;
+            if (!isIdentity && !data.id) {
+                const [maxRows] = await sequelize.query(
+                    `SELECT ISNULL(MAX(id), 0) + 1 AS nextId FROM tbl_Project_Ticket WITH (UPDLOCK, HOLDLOCK)`,
+                    { transaction }
+                ) as any[];
+                data.id = Number((Array.isArray(maxRows) && maxRows[0]?.nextId) || 1);
+            }
+        } catch {
+            // Ignore identity check error and proceed with model create
+        }
         
         const newTicketTask = await TicketTaskModel.create(data, { transaction });
 

@@ -1,5 +1,5 @@
 import express from 'express';
-import { getTickets, updateTicketStatus } from '../../controllers/masters/taskManagement/ticket.controller';
+import { getTickets, updateTicketStatus, getTicketByTaskOrSchedule } from '../../controllers/masters/taskManagement/ticket.controller';
 
 const router = express.Router();
 
@@ -209,6 +209,7 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
+router.get('/by-task', getTicketByTaskOrSchedule);
 router.get('/:User_Id?', getTickets);
 router.put('/', updateTicketStatus);
 

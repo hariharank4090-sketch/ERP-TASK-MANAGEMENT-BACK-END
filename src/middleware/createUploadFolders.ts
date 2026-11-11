@@ -9,6 +9,7 @@ const attendanceDir = path.join(uploadsRoot, "attendance");
 const forumDocumentDir = path.join(uploadsRoot, "forumDocuments");
 const retailerDir = path.join(uploadsRoot, "retailers");
 const visitLogDir = path.join(uploadsRoot, "visitLogs");
+const ticketsDir = path.join(uploadsRoot, "Tickets");
 
 export const createUploadFolders = () => {
     if (!fs.existsSync(productsDir)) fs.mkdirSync(productsDir);
@@ -16,6 +17,7 @@ export const createUploadFolders = () => {
     if (!fs.existsSync(forumDocumentDir)) fs.mkdirSync(forumDocumentDir);
     if (!fs.existsSync(retailerDir)) fs.mkdirSync(retailerDir);
     if (!fs.existsSync(visitLogDir)) fs.mkdirSync(visitLogDir);
+    if (!fs.existsSync(ticketsDir)) fs.mkdirSync(ticketsDir, { recursive: true });
 }
 
 export const imageFolder = {
@@ -23,5 +25,6 @@ export const imageFolder = {
     attendance: attendanceDir,
     forumDocument: forumDocumentDir,
     retailer: retailerDir,
-    visitLog: visitLogDir
+    visitLog: visitLogDir,
+    tickets: ticketsDir
 }

@@ -243,6 +243,18 @@ const parseDateString = (dateString: string): Date => {
     return d;
 };
 
+// In-memory cache for getAllSchedules
+interface ScheduleCacheEntry {
+    data: any;
+    expiry: number;
+}
+const scheduleListCache = new Map<string, ScheduleCacheEntry>();
+const SCHEDULE_CACHE_TTL = 5000; // 5 seconds cache
+
+export const invalidateScheduleCache = () => {
+    scheduleListCache.clear();
+};
+
 export const getAllSchedules = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
@@ -255,6 +267,12 @@ export const getAllSchedules = async (req: Request, res: Response) => {
                 message: 'Invalid query parameters',
                 errors: validation.errors
             });
+        }
+
+        const cacheKey = `${currentDBName}_schedules_${JSON.stringify(req.query)}`;
+        const cached = scheduleListCache.get(cacheKey);
+        if (cached && Date.now() < cached.expiry) {
+            return res.status(200).json(cached.data);
         }
 
         const { status, planType, taskId, dateFrom, dateTo, search, page = 1, limit = 20, sortBy = 'Sch_Id', sortOrder = 'DESC' } = validation.data!;
@@ -293,8 +311,8 @@ export const getAllSchedules = async (req: Request, res: Response) => {
 
         const countQuery = `
             SELECT COUNT(*) as total
-            FROM tbl_Project_Schedule s
-            LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
+            FROM tbl_Project_Schedule s WITH (NOLOCK)
+            ${search ? 'LEFT JOIN tbl_Task t WITH (NOLOCK) ON s.Task_Id = t.Task_Id' : ''}
             ${whereClause}
         `;
 
@@ -308,27 +326,25 @@ export const getAllSchedules = async (req: Request, res: Response) => {
         const orderClause = `ORDER BY ${sortColumn} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
 
         const schedulesQuery = `
-            WITH TaskCounts AS (
-                SELECT Sch_Id, COUNT(DISTINCT Emp_Id) as empCount
-                FROM tbl_Task_Details
-                GROUP BY Sch_Id
-            ),
-            ExtensionCounts AS (
-                SELECT Sch_Id, COUNT(*) as extCount
-                FROM tbl_Project_Schedule_Extend
-                GROUP BY Sch_Id
-            )
             SELECT
                 s.*, t.Task_Name, p.Plan_Type,
                 pm.Project_Name, pm.Project_Id,
                 COALESCE(tc.empCount, 0) as empCount,
                 CASE WHEN COALESCE(ec.extCount, 0) > 0 THEN 1 ELSE 0 END as hasExtension
-            FROM tbl_Project_Schedule s
-            LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
-            LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
-            LEFT JOIN tbl_Sch_Plan p ON s.Sch_Plan_Id = p.Plan_Id
-            LEFT JOIN TaskCounts tc ON s.Sch_Id = tc.Sch_Id
-            LEFT JOIN ExtensionCounts ec ON s.Sch_Id = ec.Sch_Id
+            FROM tbl_Project_Schedule s WITH (NOLOCK)
+            LEFT JOIN tbl_Task t WITH (NOLOCK) ON s.Task_Id = t.Task_Id
+            LEFT JOIN tbl_Project_Master pm WITH (NOLOCK) ON t.Project_Id = pm.Project_Id
+            LEFT JOIN tbl_Sch_Plan p WITH (NOLOCK) ON s.Sch_Plan_Id = p.Plan_Id
+            OUTER APPLY (
+                SELECT COUNT(DISTINCT td.Emp_Id) as empCount
+                FROM tbl_Task_Details td WITH (NOLOCK)
+                WHERE td.Sch_Id = s.Sch_Id
+            ) tc
+            OUTER APPLY (
+                SELECT TOP 1 1 as extCount
+                FROM tbl_Project_Schedule_Extend ec WITH (NOLOCK)
+                WHERE ec.Sch_Id = s.Sch_Id
+            ) ec
             ${whereClause}
             ${orderClause}
             OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
@@ -343,29 +359,31 @@ export const getAllSchedules = async (req: Request, res: Response) => {
         const totalPages = Math.ceil(totalRecords / limit);
 
         if (schedules.length === 0) {
-            return res.status(200).json({
+            const emptyResponse = {
                 success: true,
                 message: 'Project schedules retrieved successfully',
                 data: [],
                 total: 0,
                 totalPages: 0
-            });
+            };
+            scheduleListCache.set(cacheKey, { data: emptyResponse, expiry: Date.now() + SCHEDULE_CACHE_TTL });
+            return res.status(200).json(emptyResponse);
         }
 
         const scheduleIds = schedules.map(s => s.Sch_Id);
         const scheduleIdsStr = scheduleIds.join(',');
 
-        // Optimize child queries by filtering using IN clause for paginated schedule IDs
+        // Optimize child queries by filtering using IN clause for paginated schedule IDs with NOLOCK
         const taskDatesQuery = `
             SELECT dt.A_Id, dt.Sch_Id, dt.Task_Work_Date, dt.Task_Start_Time, dt.Task_End_Time
-            FROM tbl_Project_Sch_Task_DT dt
+            FROM tbl_Project_Sch_Task_DT dt WITH (NOLOCK)
             WHERE dt.Sch_Id IN (${scheduleIdsStr})
             ORDER BY dt.Sch_Id, dt.Task_Work_Date
         `;
 
         const planDetailsQuery = `
             SELECT pd.Sch_Id, pd.Plan_Month, pd.Plan_Day
-            FROM tbl_Project_Sch_DT pd
+            FROM tbl_Project_Sch_DT pd WITH (NOLOCK)
             WHERE pd.Sch_Id IN (${scheduleIdsStr})
         `;
 
@@ -427,13 +445,16 @@ export const getAllSchedules = async (req: Request, res: Response) => {
             planDetails: planDetailsByScheduleId[schedule.Sch_Id] || []
         }));
 
-        res.status(200).json({
+        const responsePayload = {
             success: true,
             message: 'Project schedules retrieved successfully',
             data: formattedSchedules,
             total: totalRecords,
             totalPages: totalPages
-        });
+        };
+        scheduleListCache.set(cacheKey, { data: responsePayload, expiry: Date.now() + SCHEDULE_CACHE_TTL });
+
+        res.status(200).json(responsePayload);
     } catch (e) {
         console.error('Error in getAllSchedules:', e);
         servError(e, res);
@@ -839,7 +860,7 @@ export const createSchedule = async (req: Request, res: Response) => {
             const y = d.getFullYear();
             const m = String(d.getMonth() + 1).padStart(2, '0');
             const day = String(d.getDate()).padStart(2, '0');
-            const autoSchNo = `SCH-${y}-${m}-${day}-${nextSchId}`;
+            const autoSchNo = /TCK-/i.test(String(Sch_No || '')) ? `${String(Sch_No).trim().slice(0, 35)}-${nextSchId}` : `SCH-${y}-${m}-${day}-${nextSchId}`;
 
             const Sch_First_Start_Date = validation.data!.Sch_First_Start_Date || Sch_Start_Date;
             const Sch_First_End_Date = validation.data!.Sch_First_End_Date || Sch_End_Date;
@@ -944,6 +965,8 @@ export const createSchedule = async (req: Request, res: Response) => {
                 ) as any[]
                 : [];
 
+
+            invalidateScheduleCache();
 
             return created(res, {
                 ...data[0],
@@ -1307,6 +1330,8 @@ export const updateSchedule = async (req: Request, res: Response) => {
                 { replacements: [scheduleId], type: QueryTypes.SELECT }
             ) as any[];
 
+            invalidateScheduleCache();
+
             return updated(res, { ...data[0], taskDates: taskDatesResult, planDetails: planDt }, 'Project schedule updated successfully');
 
         } catch (error) {
@@ -1409,6 +1434,8 @@ export const updateScheduleStatus = async (req: Request, res: Response) => {
             planDetails: planDt
         } : null;
 
+        invalidateScheduleCache();
+
         updated(res, responseData, 'Schedule status updated successfully');
     } catch (e) {
         console.error('Error in updateScheduleStatus:', e);
@@ -1431,6 +1458,8 @@ export const deleteSchedule = async (req: Request, res: Response) => {
              WHERE Sch_Id = ? AND Sch_Del_Flag = 0`,
             { replacements: [validation.data!.id] }
         );
+
+        invalidateScheduleCache();
 
         deleted(res, 'Project schedule deleted successfully');
     } catch (e) {

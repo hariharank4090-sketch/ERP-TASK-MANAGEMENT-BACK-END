@@ -4,12 +4,7 @@ import { QueryTypes, Sequelize } from 'sequelize';
 import {
     getDefaultConnection,
     getUserDatabaseConnectionFromToken,
-    getCompanyIdFromToken,
-    getCompanyRawConfig as getDBCompanyRawConfig,
 } from '../../../config/database.config';
-import dotenv from 'dotenv';
-
-dotenv.config();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,57 +76,7 @@ interface UserInfo {
     localUserId: number;
 }
 
-interface CompanyRawConfig {
-    id: number;
-    name: string;
-    rawHost: string;
-    user: string;
-    password: string;
-    database: string;
-}
 
-// Cache for User Portal connections per company
-const userPortalConnections: Map<number, Sequelize> = new Map();
-
-// Store raw company configurations
-const companyRawConfigs: Map<number, CompanyRawConfig> = new Map();
-
-// Load raw company configurations from environment
-const loadRawCompanyConfigurations = (): void => {
-
-    const companyIndices = new Set<number>();
-    for (const key of Object.keys(process.env)) {
-        const match = key.match(/^COMPANY(\d+)_/);
-        if (match) {
-            companyIndices.add(parseInt(match[1], 10));
-        }
-    }
-    const sortedIndices = Array.from(companyIndices).sort((a, b) => a - b);
-    for (const i of sortedIndices) {
-        const companyId = parseInt(process.env[`COMPANY${i}_ID`] ?? `${i}`, 10);
-        const dbName = process.env[`COMPANY${i}_DATABASE`];
-        const dbHost = process.env[`COMPANY${i}_DB_HOST`];
-        const dbUser = process.env[`COMPANY${i}_DB_USER`];
-        const dbPassword = process.env[`COMPANY${i}_DB_PASSWORD`];
-        const companyName = process.env[`COMPANY${i}_NAME`];
-
-        if (!companyId || !dbName || !dbHost || !dbUser || !dbPassword) continue;
-
-        const config: CompanyRawConfig = {
-            id: companyId,
-            name: companyName ?? `Company ${companyId}`,
-            rawHost: dbHost,
-            user: dbUser,
-            password: dbPassword,
-            database: dbName,
-        };
-
-        companyRawConfigs.set(companyId, config);
-    }
-
-};
-
-loadRawCompanyConfigurations();
 
 // ─── Response helpers ────────────────────────────────────────────────────────
 
@@ -222,7 +167,7 @@ const buildMenuStructure = (rows: MenuRow[]): MenuWithChildren[] => {
     }));
 };
 
-// ─── Helper: get company DB connection (for rights tables) ────────────────────
+// ─── Helper: get company DB connection (for rights and menu tables) ────────────────────
 
 const getCompanyDB = async (token: string | null): Promise<Sequelize> => {
     if (!token) return getDefaultConnection();
@@ -233,149 +178,7 @@ const getCompanyDB = async (token: string | null): Promise<Sequelize> => {
     }
 };
 
-// ─── Helper: parse raw host string with proper port extraction ────────────────
-
-const parseRawHostString = (raw: string): { server: string; port?: number; instance?: string } => {
-    let s = raw.trim().replace(/^["']|["']$/g, '');
-    s = s.replace(/\\\\/g, '\\');
-
-    // Handle format "122.165.240.65\SQL_2019,1435" - instance with explicit port
-    const instanceWithPortMatch = s.match(/^([^\\,]+)\\([^,]+),(\d+)$/);
-    if (instanceWithPortMatch) {
-        return {
-            server: instanceWithPortMatch[1].trim(),
-            instance: instanceWithPortMatch[2].trim(),
-            port: parseInt(instanceWithPortMatch[3], 10)
-        };
-    }
-
-    // Handle format "server\instance" only
-    const instanceOnlyMatch = s.match(/^([^\\,]+)\\([^\\,]+)$/);
-    if (instanceOnlyMatch) {
-        return {
-            server: instanceOnlyMatch[1].trim(),
-            instance: instanceOnlyMatch[2].trim()
-        };
-    }
-
-    // Handle format "server,port"
-    const portOnlyMatch = s.match(/^([^\\,]+),(\d+)$/);
-    if (portOnlyMatch) {
-        return {
-            server: portOnlyMatch[1].trim(),
-            port: parseInt(portOnlyMatch[2], 10)
-        };
-    }
-
-    // Plain server/IP
-    return { server: s };
-};
-
-const buildDialectOptions = (instance?: string, explicitPort?: number): any => {
-    const opts: any = {
-        options: {
-            encrypt: false,
-            trustServerCertificate: true,
-            requestTimeout: 60000,
-            connectionTimeout: 30000,
-        },
-    };
-    // Only use instance name if we have an instance AND no explicit port
-    if (instance && !explicitPort) {
-        opts.options.instanceName = instance;
-    }
-    return opts;
-};
-
-// ─── Helper: get company raw config by ID ─────────────────────────────────────
-
-const getCompanyRawConfig = (companyId: number): CompanyRawConfig | null => {
-    return companyRawConfigs.get(companyId) ?? (getDBCompanyRawConfig(companyId) as CompanyRawConfig | null) ?? null;
-};
-
-// ─── Helper: get User Portal connection via COMPANY HOST using RAW config ──────
-
-const getUserPortalViaCompanyHost = async (token: string | null): Promise<Sequelize> => {
-    if (!token) return getDefaultConnection();
-
-    try {
-        // Get company ID from token
-        const companyId = getCompanyIdFromToken(token);
-        if (!companyId) {
-            return getDefaultConnection();
-        }
-
-        // Check cache
-        if (userPortalConnections.has(companyId)) {
-            const cached = userPortalConnections.get(companyId)!;
-            return cached;
-        }
-
-        // Get raw company configuration
-        const companyRawConfig = getCompanyRawConfig(companyId);
-        if (!companyRawConfig) {
-            return getDefaultConnection();
-        }
-
-
-        // Parse raw host string
-        const h = parseRawHostString(companyRawConfig.rawHost);
-
-
-        // Determine the port to use
-        const usePort = h.port !== undefined ? h.port : (h.instance ? undefined : 1433);
-
-
-        const baseOpts = buildDialectOptions(h.instance, h.port);
-        const userPortalConnection = new Sequelize({
-            dialect: 'mssql',
-            host: h.server,
-            port: usePort,
-            username: companyRawConfig.user,
-            password: companyRawConfig.password,
-            database: 'User_Portal',
-            logging: false,
-            dialectOptions: {
-                ...baseOpts,
-                options: {
-                    ...baseOpts.options,
-                    connectionTimeout: 300
-                }
-            },
-            // Aggressive idle timeout (1s) to prevent firewall dropping stale connections 
-            // and causing 21s ECONNRESET hangs when pulled from the pool.
-            pool: { max: 10, min: 0, acquire: 30000, idle: 1000, evict: 1000 },
-            retry: {
-                match: [
-                    /ECONNRESET/,
-                    /ConnectionError/,
-                    /SequelizeConnectionError/,
-                    /SequelizeConnectionRefusedError/,
-                    /SequelizeHostNotFoundError/,
-                    /SequelizeHostNotReachableError/,
-                    /SequelizeInvalidConnectionError/,
-                    /SequelizeConnectionAcquireTimeoutError/,
-                    /ETIMEOUT/,
-                    /EINVALIDSTATE/,
-                    /LoggedIn state/
-                ],
-                max: 3
-            }
-        });
-
-        await userPortalConnection.authenticate();
-
-        // Cache the connection
-        userPortalConnections.set(companyId, userPortalConnection);
-        return userPortalConnection;
-
-    } catch (error) {
-        console.error('Error connecting to User_Portal via company host:', error);
-        return getDefaultConnection();
-    }
-};
-
-// ─── Helper: get user info from token (from default User Portal) ──────────────
+// ─── Helper: get user info from token (from default database) ──────────────
 
 const getUserInfoFromToken = async (token: string | null): Promise<UserInfo | null> => {
     if (!token) return null;
@@ -406,15 +209,14 @@ const getUserInfoFromToken = async (token: string | null): Promise<UserInfo | nu
 
 const getUserMenuRights = async (token: string | null): Promise<MenuRow[] | false> => {
     try {
-        const [userInfo, companyDB, portalDB] = await Promise.all([
+        const [userInfo, companyDB] = await Promise.all([
             getUserInfoFromToken(token),
             getCompanyDB(token),
-            getUserPortalViaCompanyHost(token)
         ]);
 
         // Admin / management → full rights
         if (userInfo && (isEqualNumber(userInfo.userTypeId, 0) || isEqualNumber(userInfo.userTypeId, 1))) {
-            const rows = await portalDB.query(
+            const rows = await companyDB.query(
                 `SELECT *,
                     1 AS Read_Rights,
                     1 AS Add_Rights,
@@ -432,7 +234,7 @@ const getUserMenuRights = async (token: string | null): Promise<MenuRow[] | fals
 
         // Run menu and rights queries in parallel
         const [menus, userRights, userTypeRights] = await Promise.all([
-            portalDB.query(
+            companyDB.query(
                 `SELECT * FROM tbl_AppMenu`,
                 { type: QueryTypes.SELECT }
             ) as Promise<MenuRow[]>,
@@ -495,9 +297,8 @@ const getUserRightsForSpecificUser = async (targetUserId: number, token: string 
     try {
         const currentUserInfo = await getUserInfoFromToken(token);
         const companyDB = await getCompanyDB(token);
-        const portalDB = await getUserPortalViaCompanyHost(token);
 
-        const menus = await portalDB.query(
+        const menus = await companyDB.query(
             `SELECT * FROM tbl_AppMenu`,
             { type: QueryTypes.SELECT }
         ) as MenuRow[];
@@ -529,8 +330,8 @@ const getUserRightsForSpecificUser = async (targetUserId: number, token: string 
             { replacements: { targetUserId }, type: QueryTypes.SELECT },
         ) as any[];
 
-        const defaultPortalDB = getDefaultConnection();
-        const targetUserInfo = await defaultPortalDB.query(
+        const defaultDB = getDefaultConnection();
+        const targetUserInfo = await defaultDB.query(
             `SELECT UserTypeId, Local_User_ID FROM tbl_Users WHERE Global_User_ID = :targetUserId AND UDel_Flag = 0`,
             { replacements: { targetUserId }, type: QueryTypes.SELECT },
         ) as any[];
@@ -579,18 +380,17 @@ const getUserRightsForSpecificUser = async (targetUserId: number, token: string 
 const getUserBasedRights = async (userId: number, token: string | null): Promise<MenuRow[] | false> => {
     try {
         const companyDB = await getCompanyDB(token);
-        const portalDB = await getUserPortalViaCompanyHost(token);
 
-        const menus = await portalDB.query(
+        const menus = await companyDB.query(
             `SELECT * FROM tbl_AppMenu`,
             { type: QueryTypes.SELECT }
         ) as MenuRow[];
 
-        const defaultPortalDB = getDefaultConnection();
+        const defaultDB = getDefaultConnection();
         let targetUserInfo: any[] = [];
 
         try {
-            targetUserInfo = await portalDB.query(
+            targetUserInfo = await companyDB.query(
                 `SELECT UserTypeId, Local_User_ID, Global_User_ID FROM tbl_Users WHERE (Global_User_ID = :userId OR Local_User_ID = :userId OR UserId = :userId) AND UDel_Flag = 0`,
                 { replacements: { userId }, type: QueryTypes.SELECT },
             ) as any[];
@@ -600,7 +400,7 @@ const getUserBasedRights = async (userId: number, token: string | null): Promise
 
         if (!targetUserInfo.length) {
             try {
-                targetUserInfo = await defaultPortalDB.query(
+                targetUserInfo = await defaultDB.query(
                     `SELECT UserTypeId, Local_User_ID, Global_User_ID FROM tbl_Users WHERE (Global_User_ID = :userId OR Local_User_ID = :userId OR UserId = :userId) AND UDel_Flag = 0`,
                     { replacements: { userId }, type: QueryTypes.SELECT },
                 ) as any[];
@@ -667,9 +467,8 @@ const getUserBasedRights = async (userId: number, token: string | null): Promise
 const getUserTypeBasedRights = async (userType: number, token: string | null): Promise<MenuRow[] | false> => {
     try {
         const companyDB = await getCompanyDB(token);
-        const portalDB = await getUserPortalViaCompanyHost(token);
 
-        const menus = await portalDB.query(
+        const menus = await companyDB.query(
             `SELECT * FROM tbl_AppMenu`,
             { type: QueryTypes.SELECT }
         ) as MenuRow[];
@@ -1186,10 +985,10 @@ const appMenu = () => {
             return;
         }
 
-        const portalDB = await getUserPortalViaCompanyHost(token);
+        const companyDB = await getCompanyDB(token);
 
         try {
-            await portalDB.query(
+            await companyDB.query(
                 `INSERT INTO tbl_AppMenu
                     (name, menu_type, parent_id, url, tUrl, rUrl, actionType, display_order, is_active)
                  VALUES
@@ -1223,10 +1022,10 @@ const appMenu = () => {
             return;
         }
 
-        const portalDB = await getUserPortalViaCompanyHost(token);
+        const companyDB = await getCompanyDB(token);
 
         try {
-            await portalDB.query(
+            await companyDB.query(
                 `UPDATE tbl_AppMenu SET
                     name = :name,
                     menu_type = :menu_type,
@@ -1262,10 +1061,10 @@ const appMenu = () => {
             return;
         }
 
-        const portalDB = await getUserPortalViaCompanyHost(token);
+        const companyDB = await getCompanyDB(token);
 
         try {
-            const allMenus = await portalDB.query(
+            const allMenus = await companyDB.query(
                 `SELECT * FROM tbl_AppMenu`,
                 { type: QueryTypes.SELECT }
             ) as MenuRow[];

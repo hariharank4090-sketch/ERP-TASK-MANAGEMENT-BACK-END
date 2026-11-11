@@ -67,7 +67,11 @@ export const workMasterCreateSchema = z.object({
     Work_Status: z.number().min(1).max(3).optional().default(1),
     Entry_By: z.number().optional().nullable(),
     Process_Id: z.number().optional().nullable(),
-    Parameters: z.array(workParameterSchema).optional().default([])
+    Parameters: z.array(workParameterSchema).optional().default([]),
+    Ticket_Id: z.coerce.number().optional().nullable(),
+    Ticket_Status: z.string().optional().nullable(),
+    From_CompanyId: z.coerce.number().optional().nullable(),
+    To_CompanyId: z.coerce.number().optional().nullable()
 });
 
 export const workMasterUpdateSchema = z.object({
@@ -82,7 +86,11 @@ export const workMasterUpdateSchema = z.object({
     Work_Status: z.number().min(1).max(3).optional(),
     Update_By: z.number().optional().nullable(),
     Process_Id: z.number().optional().nullable(),
-    Parameters: z.array(workParameterSchema).optional()
+    Parameters: z.array(workParameterSchema).optional(),
+    Ticket_Id: z.coerce.number().optional().nullable(),
+    Ticket_Status: z.string().optional().nullable(),
+    From_CompanyId: z.coerce.number().optional().nullable(),
+    To_CompanyId: z.coerce.number().optional().nullable()
 });
 
 export const workMasterQuerySchema = z.object({

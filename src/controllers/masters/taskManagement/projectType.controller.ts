@@ -94,6 +94,18 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     return true;
 };
 
+// Cache for getAllProjects to handle high-concurrency load
+interface ProjectCacheEntry {
+    data: any[];
+    expiry: number;
+}
+const projectListCache = new Map<string, ProjectCacheEntry>();
+const PROJECT_CACHE_TTL = 5000; // 5 seconds cache
+
+export const invalidateProjectCache = () => {
+    projectListCache.clear();
+};
+
 /**
  * Get all projects (no pagination, no filters)
  */
@@ -103,18 +115,19 @@ export const getAllProjects = async (req: Request, res: Response) => {
         if (!checkUserPermission(req, 'view_projects')) {
             return handleForbiddenError(res, 'You do not have permission to view projects');
         }
-        
-        // Get the Project model for this company's database
-        const Project = getProjectModel(req);
-        
-        // Build where clause
-        const whereClause: any = {};
-        
-        // Add company filter if user has company restriction
+
         const user = (req as any).user;
         const currentCompanyId = (req as any).currentCompanyId || user?.Company_Id;
-        if (currentCompanyId) {
-            whereClause.Company_Id = currentCompanyId;
+        const currentDBName = (req as any).currentDBName || 'default';
+        const cacheKey = `${currentDBName}_${currentCompanyId || 'all'}`;
+
+        const cached = projectListCache.get(cacheKey);
+        if (cached && Date.now() < cached.expiry) {
+            return res.status(200).json({
+                success: true,
+                message: 'Projects retrieved successfully',
+                data: cached.data
+            });
         }
 
         // Use raw query for performance on large datasets
@@ -144,6 +157,11 @@ export const getAllProjects = async (req: Request, res: Response) => {
             statusText: getStatusText(project.IsActive),
             projectStatusText: getProjectStatusText(project.Project_Status)
         }));
+
+        projectListCache.set(cacheKey, {
+            data: formattedProjects,
+            expiry: Date.now() + PROJECT_CACHE_TTL
+        });
 
         return res.status(200).json({
             success: true,
@@ -457,6 +475,8 @@ export const createProject = async (req: Request, res: Response) => {
         // Format project with status text
         const formattedProject = formatProjectForResponse(project);
         
+        invalidateProjectCache();
+
         return created(res, {
             success: true,
             message: 'Project created successfully',
@@ -565,6 +585,8 @@ export const updateProject = async (req: Request, res: Response) => {
         // Format project with status text
         const formattedProject = formatProjectForResponse(updatedProject);
         
+        invalidateProjectCache();
+
         return updated(res, {
             success: true,
             message: 'Project updated successfully',
@@ -623,6 +645,8 @@ export const deleteProject = async (req: Request, res: Response) => {
             Update_Date: new Date()
         });
         
+        invalidateProjectCache();
+
         return res.status(200).json({
             success: true,
             message: 'Project deactivated successfully'
@@ -759,6 +783,8 @@ export const toggleProjectStatus = async (req: Request, res: Response) => {
         }
 
         const formattedProject = formatProjectForResponse(updatedProject);
+
+        invalidateProjectCache();
 
         return updated(res, {
             success: true,
@@ -913,6 +939,8 @@ export const hardDeleteProject = async (req: Request, res: Response) => {
 
         await project.destroy();
         
+        invalidateProjectCache();
+
         return res.status(200).json({
             success: true,
             message: 'Project permanently deleted successfully'
@@ -978,6 +1006,8 @@ export const reactivateProject = async (req: Request, res: Response) => {
 
         // Format project with status text
         const formattedProject = formatProjectForResponse(updatedProject);
+
+        invalidateProjectCache();
 
         return updated(res, {
             success: true,

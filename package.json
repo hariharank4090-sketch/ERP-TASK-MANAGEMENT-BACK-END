@@ -11,7 +11,8 @@
         "test:verbose": "vitest run --reporter=verbose --silent",
         "test:silent": "vitest run --silent",
         "test:json": "vitest run --reporter=json --outputFile=test-results.json",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "codex": "codex"
     },
     "keywords": [
         "erp",
@@ -39,6 +40,7 @@
         "mssql": "^12.1.0",
         "multer": "^2.0.2",
         "node-fetch": "^3.3.2",
+        "openai": "^7.50.0",
         "path": "^0.12.7",
         "sequelize": "^6.37.8",
         "swagger-jsdoc": "^6.2.8",
@@ -48,6 +50,7 @@
         "zod": "^4.3.6"
     },
     "devDependencies": {
+        "@openai/codex": "^0.1.0",
         "@types/bcrypt": "^6.0.0",
         "@types/bcryptjs": "^2.4.6",
         "@types/compression": "^1.8.1",

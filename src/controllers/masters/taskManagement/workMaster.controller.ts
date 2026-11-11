@@ -13,6 +13,7 @@ import {
     WorkMasterQueryParams,
     WorkMasterAttributes
 } from '../../../models/workMaster/type.model';
+import { syncTicketWorkAndStatus } from './ticket.controller';
 
 // ─────────────────────────────────────────────────────────────────
 // STATUS MAPS
@@ -107,10 +108,10 @@ const WORK_DETAIL_SELECT_BASE = `
 `;
 
 const WORK_DETAIL_FROM_CLAUSE = `
-    FROM tbl_Work_Master wm
-    LEFT JOIN tbl_Task t ON wm.Task_Id = t.Task_Id
-    LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
-    LEFT JOIN tbl_Project_Schedule ps ON wm.Sch_Id = ps.Sch_Id
+    FROM tbl_Work_Master wm WITH (NOLOCK)
+    LEFT JOIN tbl_Task t WITH (NOLOCK) ON wm.Task_Id = t.Task_Id
+    LEFT JOIN tbl_Project_Master pm WITH (NOLOCK) ON t.Project_Id = pm.Project_Id
+    LEFT JOIN tbl_Project_Schedule ps WITH (NOLOCK) ON wm.Sch_Id = ps.Sch_Id
 `;
 
 const WORK_DETAIL_SELECT = `
@@ -170,6 +171,18 @@ const formatWorkRow = (row: WorkWithDetails, index: number = 0): any => ({
 // GET ALL
 // ─────────────────────────────────────────────────────────────────
 
+// In-memory cache for getAllWorks
+interface WorkCacheEntry {
+    data: any[];
+    expiry: number;
+}
+const workListCache = new Map<string, WorkCacheEntry>();
+const WORK_CACHE_TTL = 5000; // 5 seconds cache
+
+export const invalidateWorkCache = () => {
+    workListCache.clear();
+};
+
 export const getAllWorks = async (req: Request, res: Response) => {
     try {
         const sequelizeInstance = getSequelizeFromRequest(req);
@@ -177,6 +190,13 @@ export const getAllWorks = async (req: Request, res: Response) => {
 
         if (!validation.success) {
             return res.status(400).json({ success: false, message: 'Validation failed', errors: validation.errors });
+        }
+
+        const currentDBName = (req as any).currentDBName || 'default';
+        const cacheKey = `${currentDBName}_works_${JSON.stringify(req.query)}`;
+        const cached = workListCache.get(cacheKey);
+        if (cached && Date.now() < cached.expiry) {
+            return res.status(200).json({ success: true, message: 'Works retrieved successfully', data: cached.data });
         }
 
         const { search, empId, taskId, schId, fromDate, toDate, workStatus, sortBy = 'Work_Dt', sortOrder = 'DESC' } = validation.data!;
@@ -211,25 +231,31 @@ export const getAllWorks = async (req: Request, res: Response) => {
         // Fetch all parameters in fast bulk chunks to avoid implicit conversion and parameter limits
         if (rows.length > 0) {
             // Explicitly cast to Number so SQL Server uses the INT index instead of scanning (NVARCHAR conversion)
-            const allWorkIds = rows.map(r => Number(r.Work_Id)).filter(id => !isNaN(id));
+            const allWorkIds = rows.map(r => Number(r.Work_Id)).filter(id => !isNaN(id) && id > 0);
 
             const paramsMap = new Map();
 
-            // Process in chunks of 500 to avoid SQL Server limits
+            // Process in chunks of 500 concurrently to avoid sequential round-trip delays
             const chunkSize = 500;
+            const chunkPromises: Promise<any[]>[] = [];
             for (let i = 0; i < allWorkIds.length; i += chunkSize) {
                 const chunkIds = allWorkIds.slice(i, i + chunkSize);
                 if (chunkIds.length === 0) continue;
 
-                const params = await sequelizeInstance.query(`
-                    SELECT wp.Work_Id, wp.WNo, wp.Param_Id, tp.Paramet_Data_Type, tp.PA_Id,
-                           wp.Default_Value, wp.Current_Value
-                    FROM tbl_Work_Paramet_DT wp
-                    LEFT JOIN tbl_Task_Paramet_DT tp
-                        ON wp.Task_Id = tp.Task_Id AND wp.Param_Id = tp.Param_Id
-                    WHERE wp.Work_Id IN (:chunkIds)
-                `, { replacements: { chunkIds }, type: QueryTypes.SELECT }) as any[];
+                chunkPromises.push(
+                    sequelizeInstance.query(`
+                        SELECT wp.Work_Id, wp.WNo, wp.Param_Id, tp.Paramet_Data_Type, tp.PA_Id,
+                               wp.Default_Value, wp.Current_Value
+                        FROM tbl_Work_Paramet_DT wp WITH (NOLOCK)
+                        LEFT JOIN tbl_Task_Paramet_DT tp WITH (NOLOCK)
+                            ON wp.Task_Id = tp.Task_Id AND wp.Param_Id = tp.Param_Id
+                        WHERE wp.Work_Id IN (:chunkIds)
+                    `, { replacements: { chunkIds }, type: QueryTypes.SELECT }) as Promise<any[]>
+                );
+            }
 
+            const chunkResults = await Promise.all(chunkPromises);
+            for (const params of chunkResults) {
                 params.forEach(p => {
                     const key = String(p.Work_Id);
                     if (!paramsMap.has(key)) paramsMap.set(key, []);
@@ -243,7 +269,10 @@ export const getAllWorks = async (req: Request, res: Response) => {
             });
         }
 
-        return res.status(200).json({ success: true, message: 'Works retrieved successfully', data: rows.map(formatWorkRow) });
+        const formattedRows = rows.map(formatWorkRow);
+        workListCache.set(cacheKey, { data: formattedRows, expiry: Date.now() + WORK_CACHE_TTL });
+
+        return res.status(200).json({ success: true, message: 'Works retrieved successfully', data: formattedRows });
 
     } catch (e: any) {
         console.error('Get All Error:', e);
@@ -496,10 +525,25 @@ export const createWork = async (req: Request, res: Response) => {
 
         await transaction.commit();
 
+        await syncTicketWorkAndStatus(req, {
+            ticketId: data.Ticket_Id ?? req.body?.Ticket_Id,
+            taskId: data.Task_Id,
+            schId: data.Sch_Id,
+            empId: data.Emp_Id,
+            workStatus: data.Work_Status,
+            ticketStatus: data.Ticket_Status ?? req.body?.Ticket_Status,
+            workDone: data.Work_Done,
+            fromCompanyId: data.From_CompanyId ?? req.body?.From_CompanyId,
+            toCompanyId: data.To_CompanyId ?? req.body?.To_CompanyId,
+            updatedBy: data.Entry_By
+        });
+
         const result = await sequelizeInstance.query<WorkWithDetails>(
             `${WORK_DETAIL_SELECT} WHERE wm.SNo = :sno`,
             { replacements: { sno }, type: QueryTypes.SELECT }
         );
+
+        invalidateWorkCache();
 
         return res.status(201).json({
             success: true,
@@ -595,10 +639,25 @@ export const updateWork = async (req: Request, res: Response) => {
 
             await transaction.commit();
 
+            await syncTicketWorkAndStatus(req, {
+                ticketId: data.Ticket_Id ?? req.body?.Ticket_Id,
+                taskId: insertData.Task_Id,
+                schId: insertData.Sch_Id,
+                empId: insertData.Emp_Id,
+                workStatus: insertData.Work_Status,
+                ticketStatus: data.Ticket_Status ?? req.body?.Ticket_Status,
+                workDone: insertData.Work_Done,
+                fromCompanyId: data.From_CompanyId ?? req.body?.From_CompanyId,
+                toCompanyId: data.To_CompanyId ?? req.body?.To_CompanyId,
+                updatedBy: insertData.Entry_By
+            });
+
             const result = await sequelizeInstance.query<WorkWithDetails>(
                 `${WORK_DETAIL_SELECT} WHERE wm.SNo = :sno`,
                 { replacements: { sno: newSno }, type: QueryTypes.SELECT }
             );
+
+            invalidateWorkCache();
 
             return res.status(200).json({
                 success: true,
@@ -691,10 +750,25 @@ export const updateWork = async (req: Request, res: Response) => {
 
         await transaction.commit();
 
+        await syncTicketWorkAndStatus(req, {
+            ticketId: data.Ticket_Id ?? req.body?.Ticket_Id,
+            taskId: data.Task_Id ?? existingWork.Task_Id,
+            schId: data.Sch_Id ?? existingWork.Sch_Id,
+            empId: data.Emp_Id ?? existingWork.Emp_Id,
+            workStatus: data.Work_Status ?? existingWork.Work_Status,
+            ticketStatus: data.Ticket_Status ?? req.body?.Ticket_Status,
+            workDone: data.Work_Done ?? existingWork.Work_Done,
+            fromCompanyId: data.From_CompanyId ?? req.body?.From_CompanyId,
+            toCompanyId: data.To_CompanyId ?? req.body?.To_CompanyId,
+            updatedBy: data.Update_By ?? existingWork.Update_By
+        });
+
         const result = await sequelizeInstance.query<WorkWithDetails>(
             `${WORK_DETAIL_SELECT} WHERE wm.SNo = :id`,
             { replacements: { id }, type: QueryTypes.SELECT }
         );
+
+        invalidateWorkCache();
 
         return res.status(200).json({ success: true, message: 'Work updated successfully', data: formatWorkRow(result[0], 0) });
 
@@ -739,6 +813,7 @@ export const deleteWork = async (req: Request, res: Response) => {
         });
 
         await transaction.commit();
+        invalidateWorkCache();
         return res.status(200).json({ success: true, message: 'Work deleted successfully' });
 
     } catch (e: any) {

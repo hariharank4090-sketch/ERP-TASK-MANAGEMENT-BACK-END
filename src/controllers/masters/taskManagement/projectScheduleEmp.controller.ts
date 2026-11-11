@@ -92,6 +92,18 @@ const getTaskDetailModel = (sequelizeInstance: Sequelize) => {
     return initTaskDetailModel(sequelizeInstance);
 };
 
+// In-memory cache for getAllTaskDetails
+interface TaskDetailCacheEntry {
+    data: any[];
+    expiry: number;
+}
+const taskDetailListCache = new Map<string, TaskDetailCacheEntry>();
+const TASK_DETAIL_CACHE_TTL = 5000; // 5 seconds cache
+
+export const invalidateTaskDetailCache = () => {
+    taskDetailListCache.clear();
+};
+
 export const getAllTaskDetails = async (req: Request, res: Response) => {
     try {
         const companyDB = getCompanyDB(req);
@@ -103,6 +115,17 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
                 success: false,
                 message: 'Validation failed',
                 errors: validation.errors
+            });
+        }
+
+        const currentDBName = (req as any).currentDBName || 'default';
+        const cacheKey = `${currentDBName}_taskdetails_${JSON.stringify(req.query)}`;
+        const cached = taskDetailListCache.get(cacheKey);
+        if (cached && Date.now() < cached.expiry) {
+            return res.status(200).json({
+                success: true,
+                message: 'Task details retrieved successfully',
+                data: cached.data
             });
         }
 
@@ -152,13 +175,13 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
             startDate.setHours(0, 0, 0, 0);
             const endDate = new Date(to_Task_Assign_dt);
             endDate.setHours(23, 59, 59, 999);
-            whereClause += ' AND td.Task_Assign_dt <= :to_Task_Assign_dt AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, 1) != 3)';
+            whereClause += ' AND td.Task_Assign_dt <= :to_Task_Assign_dt AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, latest_ps.Sch_Status, 1) != 3)';
             replacements.from_Task_Assign_dt = startDate;
             replacements.to_Task_Assign_dt = endDate;
         } else if (from_Task_Assign_dt) {
             const startDate = new Date(from_Task_Assign_dt);
             startDate.setHours(0, 0, 0, 0);
-            whereClause += ' AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, 1) != 3)';
+            whereClause += ' AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, latest_ps.Sch_Status, 1) != 3)';
             replacements.from_Task_Assign_dt = startDate;
         } else if (to_Task_Assign_dt) {
             const endDate = new Date(to_Task_Assign_dt);
@@ -168,29 +191,32 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
         }
 
         const rows: any[] = await companyDB.query(
-            `WITH LatestSchedules AS (
-                 SELECT Task_Id, MAX(Sch_Id) as Max_Sch_Id
-                 FROM tbl_Project_Schedule
-                 GROUP BY Task_Id
-             )
-             SELECT 
+            `SELECT 
                 td.*,
-                ps.Task_Sch_Timer_Based as Schedule_Task_Sch_Timer_Based,
-                ps.Sch_No as Schedule_Sch_No,
-                ps.Sch_Date as Schedule_Sch_Date,
-                ps.Task_Type_Id as Schedule_Task_Type_Id,
-                ps.Sch_Plan_Id as Schedule_Sch_Plan_Id,
-                ps.Sch_Start_Date as Schedule_Sch_Start_Date,
-                ps.Sch_End_Date as Schedule_Sch_End_Date,
-                ps.Task_Sch_Duaration as Schedule_Task_Sch_Duaration,
-                ps.Sch_Status as Schedule_Sch_Status,
+                COALESCE(ps.Task_Sch_Timer_Based, latest_ps.Task_Sch_Timer_Based) as Schedule_Task_Sch_Timer_Based,
+                COALESCE(ps.Sch_No, latest_ps.Sch_No) as Schedule_Sch_No,
+                COALESCE(ps.Sch_Date, latest_ps.Sch_Date) as Schedule_Sch_Date,
+                COALESCE(ps.Task_Type_Id, latest_ps.Task_Type_Id) as Schedule_Task_Type_Id,
+                COALESCE(ps.Sch_Plan_Id, latest_ps.Sch_Plan_Id) as Schedule_Sch_Plan_Id,
+                COALESCE(ps.Sch_Start_Date, latest_ps.Sch_Start_Date) as Schedule_Sch_Start_Date,
+                COALESCE(ps.Sch_End_Date, latest_ps.Sch_End_Date) as Schedule_Sch_End_Date,
+                COALESCE(ps.Task_Sch_Duaration, latest_ps.Task_Sch_Duaration) as Schedule_Task_Sch_Duaration,
+                COALESCE(ps.Sch_Status, latest_ps.Sch_Status) as Schedule_Sch_Status,
                 t.Task_Name,
                 t.Task_Desc,
                 t.Task_Type_Id
-             FROM tbl_Task_Details td
-             LEFT JOIN LatestSchedules ls ON ls.Task_Id = td.Task_Id
-             LEFT JOIN tbl_Project_Schedule ps ON ps.Sch_Id = COALESCE(td.Sch_Id, ls.Max_Sch_Id)
-             LEFT JOIN tbl_Task t ON td.Task_Id = t.Task_Id
+             FROM tbl_Task_Details td WITH (NOLOCK)
+             LEFT JOIN tbl_Project_Schedule ps WITH (NOLOCK) ON ps.Sch_Id = td.Sch_Id
+             OUTER APPLY (
+                 SELECT TOP 1 
+                     ps2.Task_Sch_Timer_Based, ps2.Sch_No, ps2.Sch_Date, ps2.Task_Type_Id,
+                     ps2.Sch_Plan_Id, ps2.Sch_Start_Date, ps2.Sch_End_Date,
+                     ps2.Task_Sch_Duaration, ps2.Sch_Status
+                 FROM tbl_Project_Schedule ps2 WITH (NOLOCK)
+                 WHERE td.Sch_Id IS NULL AND ps2.Task_Id = td.Task_Id
+                 ORDER BY ps2.Sch_Id DESC
+             ) latest_ps
+             LEFT JOIN tbl_Task t WITH (NOLOCK) ON td.Task_Id = t.Task_Id
              WHERE ${whereClause}
              ORDER BY ${sortBy} ${sortOrder}`,
             {
@@ -252,6 +278,11 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
         }
 
         const mappedRows = Array.from(uniqueScheduleMap.values()).map(mapRawToTaskDetail);
+
+        taskDetailListCache.set(cacheKey, {
+            data: mappedRows,
+            expiry: Date.now() + TASK_DETAIL_CACHE_TTL
+        });
 
         return res.status(200).json({
             success: true,
@@ -781,6 +812,8 @@ export const updateTaskDetail = async (req: Request, res: Response) => {
 
         const mappedTaskDetail = mapRawToTaskDetail(updatedTaskDetail);
 
+        invalidateTaskDetailCache();
+
         return updated(res, {
             success: true,
             message: 'Task detail updated successfully',
@@ -826,6 +859,8 @@ export const deleteTaskDetail = async (req: Request, res: Response) => {
         }
 
         await taskDetail.destroy();
+
+        invalidateTaskDetailCache();
 
         return res.status(200).json({
             success: true,
@@ -1184,6 +1219,8 @@ export const createTaskDetailsRaw = async (req: Request, res: Response) => {
             message += `. ${duplicateRecords.length} duplicate record(s) skipped (duplicate: Sch_Id + Emp_Id + Task_Assign_dt)`;
         }
 
+        invalidateTaskDetailCache();
+
         return res.status(201).json({
             success: true,
             message: message,
@@ -1456,6 +1493,8 @@ export const updateTaskDetailsBulk = async (req: Request, res: Response) => {
         if (duplicateRecords.length > 0) {
             message += `. ${duplicateRecords.length} duplicate record(s) skipped`;
         }
+
+        invalidateTaskDetailCache();
 
         return res.status(200).json({
             success: true,
