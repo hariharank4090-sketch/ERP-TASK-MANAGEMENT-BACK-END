@@ -26,6 +26,184 @@ const generateToken = (): string => {
     return `${ts}${random}`.substring(0, 48);
 };
 
+// ─── Sync user record and Autheticate_Id to Company DB ────────────────────────
+
+export const syncUserAuthToCompanyDb = async (
+    companyId: number,
+    userRow: any,
+    companyToken: string,
+): Promise<number | null> => {
+    const fallbackLocalId = userRow?.Local_User_ID != null ? Number(userRow.Local_User_ID) : null;
+    if (!companyId || !companyToken) return fallbackLocalId;
+
+    try {
+        const defaultDb = getDefaultConnection();
+        const globalUserId = userRow?.Global_User_ID != null ? Number(userRow.Global_User_ID) : null;
+        const userName = String(userRow?.UserName ?? '').trim();
+        const name = String(userRow?.Name || userName || 'User').trim();
+        const userTypeId = userRow?.UserTypeId != null ? Number(userRow.UserTypeId) : 0;
+        const password = String(userRow?.Password ?? '');
+
+        // Ensure no other row in User_Portal shares this exact token
+        if (globalUserId !== null) {
+            try {
+                await defaultDb.query(
+                    `UPDATE [dbo].[tbl_Users]
+                     SET [Autheticate_Id] = NULL
+                     WHERE [Autheticate_Id] = :token
+                       AND NOT ([Global_User_ID] = :globalUserId AND [Company_Id] = :companyId)`,
+                    {
+                        replacements: {
+                            token: companyToken,
+                            globalUserId,
+                            companyId,
+                        },
+                    },
+                );
+            } catch {}
+        }
+
+        const companyDb = await getCompanyDatabase(companyId);
+        if (!companyDb) return fallbackLocalId;
+
+        const [existingRows] = await companyDb.query(
+            `SELECT TOP 1 [UserId]
+             FROM [dbo].[tbl_Users]
+             WHERE (
+                 (:globalUserId IS NOT NULL AND [Global_User_ID] = :globalUserId)
+                 OR (:userName <> '' AND LOWER(LTRIM(RTRIM([UserName]))) = LOWER(LTRIM(RTRIM(:userName))))
+             )
+             ORDER BY
+                 CASE WHEN :globalUserId IS NOT NULL AND [Global_User_ID] = :globalUserId THEN 0 ELSE 1 END,
+                 ISNULL([UDel_Flag], 0) ASC,
+                 [UserId] ASC`,
+            {
+                replacements: {
+                    globalUserId,
+                    userName,
+                },
+            },
+        ) as any[];
+
+        if (Array.isArray(existingRows) && existingRows.length > 0 && existingRows[0]?.UserId != null) {
+            const targetUserId = Number(existingRows[0].UserId);
+
+            await companyDb.query(
+                `UPDATE [dbo].[tbl_Users]
+                 SET [Autheticate_Id] = NULL
+                 WHERE [Autheticate_Id] = :token AND [UserId] <> :targetUserId;
+
+                 UPDATE [dbo].[tbl_Users]
+                 SET [Autheticate_Id] = :token,
+                     [UDel_Flag] = 0,
+                     [Global_User_ID] = COALESCE([Global_User_ID], :globalUserId),
+                     [Company_Id] = COALESCE([Company_Id], :companyId),
+                     [BranchId] = COALESCE([BranchId], 1),
+                     [UserTypeId] = COALESCE(:userTypeId, [UserTypeId])
+                 WHERE [UserId] = :targetUserId;`,
+                {
+                    replacements: {
+                        token: companyToken,
+                        targetUserId,
+                        globalUserId,
+                        companyId,
+                        userTypeId,
+                    },
+                },
+            );
+
+            return targetUserId;
+        }
+
+        // User exists in User_Portal for this company, but is missing from the company DB's tbl_Users
+        const [insertedRows] = await companyDb.query(
+            `UPDATE [dbo].[tbl_Users]
+             SET [Autheticate_Id] = NULL
+             WHERE [Autheticate_Id] = :token;
+
+             DECLARE @outUserId INT = NULL;
+             DECLARE @safePwd NVARCHAR(255) = LEFT(
+                 ISNULL(:password, ''),
+                 CASE
+                     WHEN COL_LENGTH('dbo.tbl_Users', 'Password') IS NOT NULL AND COL_LENGTH('dbo.tbl_Users', 'Password') > 0
+                     THEN COL_LENGTH('dbo.tbl_Users', 'Password') / 2
+                     ELSE 50
+                 END
+             );
+
+             IF COLUMNPROPERTY(OBJECT_ID('dbo.tbl_Users'), 'UserId', 'IsIdentity') = 1
+             BEGIN
+                 INSERT INTO [dbo].[tbl_Users] (
+                     [Global_User_ID], [UserTypeId], [Name], [UserName], [Password],
+                     [Company_Id], [BranchId], [UDel_Flag], [Autheticate_Id]
+                 )
+                 VALUES (
+                     :globalUserId, :userTypeId, :name, :userName, @safePwd,
+                     :companyId, 1, 0, :token
+                 );
+                 SET @outUserId = CAST(SCOPE_IDENTITY() AS INT);
+             END
+             ELSE
+             BEGIN
+                 SET @outUserId = ISNULL(:localUserId, 0);
+                 IF @outUserId <= 0 OR EXISTS (SELECT 1 FROM [dbo].[tbl_Users] WHERE [UserId] = @outUserId)
+                 BEGIN
+                     SELECT @outUserId = ISNULL(MAX([UserId]), 0) + 1 FROM [dbo].[tbl_Users];
+                 END
+                 INSERT INTO [dbo].[tbl_Users] (
+                     [UserId], [Global_User_ID], [UserTypeId], [Name], [UserName], [Password],
+                     [Company_Id], [BranchId], [UDel_Flag], [Autheticate_Id]
+                 )
+                 VALUES (
+                     @outUserId, :globalUserId, :userTypeId, :name, :userName, @safePwd,
+                     :companyId, 1, 0, :token
+                 );
+             END
+
+             SELECT @outUserId AS UserId;`,
+            {
+                replacements: {
+                    token: companyToken,
+                    password,
+                    globalUserId,
+                    userTypeId,
+                    name,
+                    userName,
+                    companyId,
+                    localUserId: fallbackLocalId,
+                },
+            },
+        ) as any[];
+
+        const createdUserId =
+            Array.isArray(insertedRows) && insertedRows.length > 0 && insertedRows[0]?.UserId != null
+                ? Number(insertedRows[0].UserId)
+                : fallbackLocalId;
+
+        if (createdUserId && !fallbackLocalId && globalUserId !== null) {
+            try {
+                await defaultDb.query(
+                    `UPDATE [dbo].[tbl_Users]
+                     SET [Local_User_ID] = :createdUserId
+                     WHERE [Global_User_ID] = :globalUserId AND [Company_Id] = :companyId AND [Local_User_ID] IS NULL`,
+                    {
+                        replacements: {
+                            createdUserId,
+                            globalUserId,
+                            companyId,
+                        },
+                    },
+                );
+            } catch {}
+        }
+
+        return createdUserId;
+    } catch (syncErr) {
+        console.warn(`⚠️ Failed to sync user auth to company ${companyId} DB:`, syncErr);
+        return fallbackLocalId;
+    }
+};
+
 // ─── AES Decryption Helper for Hidden Network Payloads ───────────────────────
 
 const tryDecryptText = (val: any): string => {
@@ -182,6 +360,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         const [allUserRows] = await sequelize.query(`
             SELECT 
                 u.Global_User_ID, u.Local_User_ID, u.Company_Id, u.Autheticate_Id, u.UserTypeId, u.Password,
+                u.Name, u.UserName,
                 c.Local_Comp_Id, c.Company_Name, c.DB_Name
             FROM tbl_Users u
             LEFT JOIN tbl_Company c ON u.Company_Id = c.Local_Comp_Id
@@ -200,10 +379,25 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             UserTypeId: number | null;
         }> = [];
 
-        // Run updates in parallel to slash login latency
-        const updatePromises = allUserRows.map(async (row) => {
+        const usedTokens = new Set<string>();
+        const assignedTokens = allUserRows.map((row) => {
             const rowCompanyId: number | null = row.Company_Id;
-            const rowLocalUserId: number | null = row.Local_User_ID;
+            if (!rowCompanyId) return '';
+            let tok: string =
+                getTokenForCompany(row.Global_User_ID, rowCompanyId) ||
+                row.Autheticate_Id ||
+                generateToken();
+            if (!tok || usedTokens.has(tok)) {
+                tok = generateToken();
+            }
+            usedTokens.add(tok);
+            return tok;
+        });
+
+        // Run updates in parallel to slash login latency
+        const updatePromises = allUserRows.map(async (row, idx) => {
+            const rowCompanyId: number | null = row.Company_Id;
+            let rowLocalUserId: number | null = row.Local_User_ID;
             const rowUserTypeId: number | null = row.UserTypeId ?? null;
             const envConfig = rowCompanyId ? getCompanyConfig(rowCompanyId) : null;
 
@@ -220,11 +414,29 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                 return null;
             }
 
-            const companyToken: string = getTokenForCompany(row.Global_User_ID, rowCompanyId) 
-                || row.Autheticate_Id 
-                || generateToken();
+            const companyToken: string = assignedTokens[idx] || generateToken();
 
             const dbConnected = true;
+
+            await UserModel.update(
+                { Autheticate_Id: companyToken },
+                { 
+                    where: { Global_User_ID: row.Global_User_ID, Company_Id: rowCompanyId }
+                }
+            );
+
+            const syncedLocalUserId = await syncUserAuthToCompanyDb(
+                rowCompanyId,
+                {
+                    ...row,
+                    Name: row.Name ?? user.Name,
+                    UserName: row.UserName ?? user.UserName,
+                },
+                companyToken,
+            );
+            if (syncedLocalUserId !== null) {
+                rowLocalUserId = syncedLocalUserId;
+            }
 
             storeTokenSession(
                 companyToken,
@@ -234,13 +446,6 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
                 rowDbName,
                 rowCompanyName,
                 row,
-            );
-
-            await UserModel.update(
-                { Autheticate_Id: companyToken },
-                { 
-                    where: { Global_User_ID: row.Global_User_ID, Company_Id: rowCompanyId }
-                }
             );
 
             return {
@@ -397,7 +602,7 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
         }
 
         const userAccess = await UserModel.findOne({
-            attributes: ['Global_User_ID', 'Local_User_ID', 'UserTypeId'],
+            attributes: ['Global_User_ID', 'Local_User_ID', 'UserTypeId', 'Name', 'UserName', 'Password', 'Autheticate_Id', 'Company_Id'],
             where: {
                 UserName: currentUser.UserName,
                 Company_Id: companyConfig.id,
@@ -415,25 +620,32 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
         }
 
         // Reuse the token already stored for this user+company if available
-        let companyToken = getTokenForCompany(userAccess.Global_User_ID, companyConfig.id);
+        let companyToken =
+            getTokenForCompany(userAccess.Global_User_ID, companyConfig.id) ||
+            userAccess.Autheticate_Id ||
+            generateToken();
 
-        if (!companyToken) {
+        if (!companyToken || companyToken === currentToken) {
             companyToken = generateToken();
-            storeTokenSession(
-                companyToken,
-                userAccess.Global_User_ID,
-                userAccess.Local_User_ID,
-                companyConfig.id,
-                companyConfig.database,
-                companyConfig.name,
-                userAccess,
-            );
-
-            await UserModel.update(
-                { Autheticate_Id: companyToken },
-                { where: { Global_User_ID: userAccess.Global_User_ID, Company_Id: companyConfig.id } },
-            );
         }
+
+        await UserModel.update(
+            { Autheticate_Id: companyToken },
+            { where: { Global_User_ID: userAccess.Global_User_ID, Company_Id: companyConfig.id } },
+        );
+
+        const syncedLocalId = await syncUserAuthToCompanyDb(companyConfig.id, userAccess, companyToken);
+        const resolvedLocalUserId = syncedLocalId ?? userAccess.Local_User_ID;
+
+        storeTokenSession(
+            companyToken,
+            userAccess.Global_User_ID,
+            resolvedLocalUserId,
+            companyConfig.id,
+            companyConfig.database,
+            companyConfig.name,
+            userAccess,
+        );
 
         // Pre-connect
         let dbConnected = false;
@@ -449,7 +661,7 @@ export const switchCompany = async (req: Request, res: Response): Promise<Respon
             data: {
                 token: companyToken,
                 user: {
-                    Local_User_ID: userAccess.Local_User_ID,
+                    Local_User_ID: resolvedLocalUserId,
                     UserTypeId: userAccess.UserTypeId,
                     Global_User_ID: userAccess.Global_User_ID,
                 },
@@ -570,7 +782,7 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
 
         const configuredCompanyIds = getAllCompanyIds();
         const userCompanies = await UserModel.unscoped().findAll({
-            attributes: ['Global_User_ID', 'Local_User_ID', 'Company_Id', 'Autheticate_Id', 'UserTypeId'],
+            attributes: ['Global_User_ID', 'Local_User_ID', 'Company_Id', 'Autheticate_Id', 'UserTypeId', 'Name', 'UserName', 'Password'],
             include: [{
                 model: CompanyModel,
                 attributes: ['Local_Comp_Id', 'Company_Name', 'DB_Name'],
@@ -583,23 +795,70 @@ export const verifyToken = async (req: Request, res: Response): Promise<Response
             },
         });
 
-        // Build currentCompany as array — only companies configured in companies.json
-        const currentCompany = userCompanies
-            .map(u => {
-                const envConfig = u.Company_Id ? getCompanyConfig(u.Company_Id) : null;
-                if (!envConfig) return null;
+        const usedVerifyTokens = new Set<string>([token]);
+        const currentCompanyRaw = await Promise.all(
+            userCompanies.map(async (u) => {
+                const compId = u.Company_Id;
+                const envConfig = compId ? getCompanyConfig(compId) : null;
+                if (!compId || !envConfig) return null;
+
+                let compToken =
+                    compId === session.companyId
+                        ? token
+                        : getTokenForCompany(u.Global_User_ID, compId) || u.Autheticate_Id || '';
+
+                if (!compToken || (compId !== session.companyId && usedVerifyTokens.has(compToken))) {
+                    compToken = generateToken();
+                }
+                usedVerifyTokens.add(compToken);
+
+                if (u.Autheticate_Id !== compToken) {
+                    await UserModel.update(
+                        { Autheticate_Id: compToken },
+                        { where: { Global_User_ID: u.Global_User_ID, Company_Id: compId } },
+                    );
+                }
+
+                const syncedLocalId = await syncUserAuthToCompanyDb(
+                    compId,
+                    {
+                        Global_User_ID: u.Global_User_ID,
+                        Local_User_ID: u.Local_User_ID,
+                        UserTypeId: u.UserTypeId,
+                        Name: u.Name ?? user.Name,
+                        UserName: u.UserName ?? user.UserName,
+                        Password: (u as any).Password ?? '',
+                    },
+                    compToken,
+                );
+
+                const resolvedLocalId = syncedLocalId ?? u.Local_User_ID;
+
+                storeTokenSession(
+                    compToken,
+                    u.Global_User_ID,
+                    resolvedLocalId,
+                    compId,
+                    envConfig.database,
+                    envConfig.name,
+                    u,
+                );
+
                 return {
-                    companyId:   u.Company_Id,
-                    companyName: envConfig.name,
-                    dbName:      envConfig.database,
-                    token:       u.Autheticate_Id ?? '',    // each company's own token
-                    dbConnected: true,
-                    UserTypeId:  u.UserTypeId,
-                    Local_User_ID: u.Local_User_ID,
+                    companyId:      compId,
+                    companyName:    envConfig.name,
+                    dbName:         envConfig.database,
+                    token:          compToken,
+                    dbConnected:    true,
+                    UserTypeId:     u.UserTypeId,
+                    Local_User_ID:  resolvedLocalId,
                     Global_User_ID: u.Global_User_ID,
                 };
-            })
-            .filter((c): c is NonNullable<typeof c> => c !== null);
+            }),
+        );
+
+        // Build currentCompany as array — only companies configured in companies.json
+        const currentCompany = currentCompanyRaw.filter((c): c is NonNullable<typeof c> => c !== null);
 
         return res.status(200).json({
             status: 'success',

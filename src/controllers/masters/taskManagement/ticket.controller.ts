@@ -6,6 +6,7 @@ import {
     verifyTokenSession
 } from '../../../config/database.config';
 import { invalidInput, failed, success, dataFound, servError } from '../../../responseObject';
+import { invalidateScheduleCache } from './projectScedule.controller';
 
 const TICKET_TABLE = '[dbo].[tbl_Ticket_Gen_Info]';
 const ALLOCATION_TABLE = '[dbo].[tbl_Ticket_Alloctation]';
@@ -215,10 +216,111 @@ const ensureTicketColumnsExist = async (pool: sql.ConnectionPool): Promise<void>
     }
 };
 
+const syncPoolTicketSchedules = async (pool: sql.ConnectionPool): Promise<void> => {
+    try {
+        await pool.request().query(`
+            IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+               AND OBJECT_ID('${TICKET_TABLE}', 'U') IS NOT NULL
+            BEGIN
+                EXEC sp_executesql N'
+                    UPDATE s
+                    SET s.[Sch_Status] = mapped.[Target_Sch_Status],
+                        s.[Sch_Comp_Date] = CASE WHEN mapped.[Target_Sch_Status] = 3 THEN ISNULL(s.[Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                        s.[Update_Date] = GETDATE()
+                    FROM [dbo].[tbl_Project_Schedule] s
+                    INNER JOIN ${TICKET_TABLE} tk
+                        ON s.[Sch_No] LIKE ''TCK-%''
+                       AND TRY_CAST(
+                            REPLACE(
+                                LEFT(
+                                    SUBSTRING(s.[Sch_No], 5, 50),
+                                    CASE
+                                        WHEN CHARINDEX(''-'', SUBSTRING(s.[Sch_No], 5, 50)) > 0
+                                        THEN CHARINDEX(''-'', SUBSTRING(s.[Sch_No], 5, 50)) - 1
+                                        ELSE LEN(SUBSTRING(s.[Sch_No], 5, 50))
+                                    END
+                                ),
+                                '' '',
+                                ''''
+                            ) AS BIGINT
+                        ) = tk.[Id]
+                    CROSS APPLY (
+                        SELECT CASE
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''closed'' THEN 3
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''pending'' THEN 2
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) IN (''new'', ''assigned'', ''inprocess'', ''in progress'', ''open'') THEN 1
+                            ELSE NULL
+                        END AS [Target_Sch_Status]
+                    ) mapped
+                    WHERE s.[Sch_Del_Flag] = 0
+                      AND mapped.[Target_Sch_Status] IS NOT NULL
+                      AND ISNULL(s.[Sch_Status], 0) <> mapped.[Target_Sch_Status];
+                ';
+            END
+
+            IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+               AND OBJECT_ID('${PROJECT_TICKET_TABLE}', 'U') IS NOT NULL
+               AND OBJECT_ID('${TICKET_TABLE}', 'U') IS NOT NULL
+            BEGIN
+                EXEC sp_executesql N'
+                    UPDATE s
+                    SET s.[Sch_Status] = mapped.[Target_Sch_Status],
+                        s.[Sch_Comp_Date] = CASE WHEN mapped.[Target_Sch_Status] = 3 THEN ISNULL(s.[Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                        s.[Update_Date] = GETDATE()
+                    FROM [dbo].[tbl_Project_Schedule] s
+                    INNER JOIN ${PROJECT_TICKET_TABLE} pt ON pt.[Task_Id] = s.[Task_Id]
+                    INNER JOIN ${TICKET_TABLE} tk ON TRY_CAST(pt.[Ticket_Id] AS BIGINT) = tk.[Id]
+                    CROSS APPLY (
+                        SELECT CASE
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''closed'' THEN 3
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''pending'' THEN 2
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) IN (''new'', ''assigned'', ''inprocess'', ''in progress'', ''open'') THEN 1
+                            ELSE NULL
+                        END AS [Target_Sch_Status]
+                    ) mapped
+                    WHERE s.[Sch_Del_Flag] = 0
+                      AND mapped.[Target_Sch_Status] IS NOT NULL
+                      AND ISNULL(s.[Sch_Status], 0) <> mapped.[Target_Sch_Status];
+                ';
+            END
+
+            IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+               AND OBJECT_ID('${ALLOCATION_TABLE}', 'U') IS NOT NULL
+               AND OBJECT_ID('${TICKET_TABLE}', 'U') IS NOT NULL
+            BEGIN
+                EXEC sp_executesql N'
+                    UPDATE s
+                    SET s.[Sch_Status] = mapped.[Target_Sch_Status],
+                        s.[Sch_Comp_Date] = CASE WHEN mapped.[Target_Sch_Status] = 3 THEN ISNULL(s.[Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                        s.[Update_Date] = GETDATE()
+                    FROM [dbo].[tbl_Project_Schedule] s
+                    INNER JOIN ${ALLOCATION_TABLE} a ON a.[T_Sch_Id] = s.[Sch_Id]
+                    INNER JOIN ${TICKET_TABLE} tk ON a.[Ticket_Id] = tk.[Id]
+                    CROSS APPLY (
+                        SELECT CASE
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''closed'' THEN 3
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''pending'' THEN 2
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) IN (''new'', ''assigned'', ''inprocess'', ''in progress'', ''open'') THEN 1
+                            ELSE NULL
+                        END AS [Target_Sch_Status]
+                    ) mapped
+                    WHERE s.[Sch_Del_Flag] = 0
+                      AND mapped.[Target_Sch_Status] IS NOT NULL
+                      AND ISNULL(s.[Sch_Status], 0) <> mapped.[Target_Sch_Status];
+                ';
+            END
+        `);
+        invalidateScheduleCache();
+    } catch (err: any) {
+        console.warn('⚠️ syncPoolTicketSchedules warning:', err.message);
+    }
+};
+
 export const getTicketsListHandler = async (req: any, res: Response) => {
     try {
         const pool = await getTicketDbPool(req);
         await ensureTicketColumnsExist(pool);
+        await syncPoolTicketSchedules(pool);
 
         const body = req.body || {};
         const queryParams = req.query || {};
@@ -928,12 +1030,80 @@ export const getTicketByTaskOrSchedule = async (req: Request, res: Response) => 
     }
 };
 
+const mapTicketStatusToScheduleStatus = (status: string | null | undefined): number | null => {
+    if (!status) return null;
+    const normalized = String(status).trim().toLowerCase();
+    if (normalized === 'closed') return 3; // Completed
+    if (normalized === 'pending') return 2; // Pending
+    if (['new', 'assigned', 'inprocess', 'in progress', 'open'].includes(normalized)) return 1; // Inprocess
+    return null;
+};
+
 export const syncTicketWorkAndStatus = async (req: any, params: TicketSyncParams) => {
     try {
+        const rawTicketStatus = params.ticketStatus ?? req.body?.Ticket_Status ?? req.body?.Status;
+        const ticketStatus =
+            rawTicketStatus !== undefined && rawTicketStatus !== null && String(rawTicketStatus).trim() !== ''
+                ? String(rawTicketStatus).trim()
+                : null;
+        const isTicketClosed = ticketStatus !== null && ticketStatus.toLowerCase() === 'closed';
+        const initialTargetSchStatus = mapTicketStatusToScheduleStatus(ticketStatus);
+
+        const paramSchId = toBigIntValue(params.schId ?? req.body?.Sch_Id);
+        const paramTaskId = toBigIntValue(params.taskId ?? req.body?.Task_Id);
+        const paramSchNo =
+            params.schNo !== undefined && params.schNo !== null && String(params.schNo).trim() !== ''
+                ? String(params.schNo).trim()
+                : req.body?.Sch_No && String(req.body.Sch_No).trim() !== ''
+                    ? String(req.body.Sch_No).trim()
+                    : '';
+
+        const updatedBy = toBigIntValue(
+            params.updatedBy ??
+            req.body?.Update_By ??
+            req.body?.Entry_By ??
+            req.body?.Updated_By ??
+            req.userId ??
+            req.localUserId
+        );
+
         const info = await resolveLinkedTicketInfo(req, params);
         if (!info || !info.Ticket_Id) {
+            if (initialTargetSchStatus !== null && ((paramSchId && paramSchId > 0n) || (paramTaskId && paramTaskId > 0n) || paramSchNo !== '')) {
+                try {
+                    const fallbackPool = await getTicketDbPool(req);
+                    const fbSchReq = new sql.Request(fallbackPool);
+                    fbSchReq.input('TargetSchStatus', sql.Int, initialTargetSchStatus);
+                    fbSchReq.input('ParamSchId', sql.BigInt, paramSchId ?? 0n);
+                    fbSchReq.input('ParamTaskId', sql.BigInt, paramTaskId ?? 0n);
+                    fbSchReq.input('ParamSchNo', sql.NVarChar(100), paramSchNo);
+                    fbSchReq.input('UpdatedBy', sql.BigInt, updatedBy);
+                    await fbSchReq.query(`
+                        IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+                        BEGIN
+                            UPDATE [dbo].[tbl_Project_Schedule]
+                            SET [Sch_Status] = @TargetSchStatus,
+                                [Sch_Comp_Date] = CASE WHEN @TargetSchStatus = 3 THEN ISNULL([Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                                [Update_By] = COALESCE(TRY_CAST(@UpdatedBy AS INT), [Update_By]),
+                                [Update_Date] = GETDATE()
+                            WHERE [Sch_Del_Flag] = 0
+                              AND (
+                                  (@ParamSchId > 0 AND [Sch_Id] = @ParamSchId)
+                                  OR (@ParamTaskId > 0 AND [Task_Id] = @ParamTaskId)
+                                  OR (@ParamSchNo <> '' AND [Sch_No] = @ParamSchNo)
+                              );
+                        END
+                    `);
+                    invalidateScheduleCache();
+                } catch (fbSchErr: any) {
+                    console.warn('⚠️ syncTicketWorkAndStatus fallback schedule status update warning:', fbSchErr.message);
+                }
+            }
             return { synced: false };
         }
+
+        const effectiveTicketStatus = ticketStatus || info.Status || null;
+        const targetSchStatus = mapTicketStatusToScheduleStatus(effectiveTicketStatus);
 
         const primaryTicketId = BigInt(info.Ticket_Id);
         const otherCompanyTicketId = info.Other_Company_TicketId ? BigInt(info.Other_Company_TicketId) : null;
@@ -962,25 +1132,20 @@ export const syncTicketWorkAndStatus = async (req: any, params: TicketSyncParams
             }
         }
 
-        const rawTicketStatus = params.ticketStatus ?? req.body?.Ticket_Status ?? req.body?.Status;
-        const ticketStatus =
-            rawTicketStatus !== undefined && rawTicketStatus !== null && String(rawTicketStatus).trim() !== ''
-                ? String(rawTicketStatus).trim()
-                : null;
+        if (isTicketClosed) {
+            isCompleted = 1;
+            if (!otherCompanyStatus) {
+                otherCompanyStatus = 'completed';
+            }
+            if (workStatusInt === null) {
+                workStatusInt = 3;
+            }
+        }
 
         const workDone =
             params.workDone !== undefined && params.workDone !== null && String(params.workDone).trim() !== ''
                 ? String(params.workDone).trim()
                 : null;
-
-        const updatedBy = toBigIntValue(
-            params.updatedBy ??
-            req.body?.Update_By ??
-            req.body?.Entry_By ??
-            req.body?.Updated_By ??
-            req.userId ??
-            req.localUserId
-        );
 
         // Gather all company DB pools (current, From_CompanyId, To_CompanyId, Involved_CompanyIds)
         const currentPool = await getTicketDbPool(req);
@@ -1180,6 +1345,75 @@ export const syncTicketWorkAndStatus = async (req: any, params: TicketSyncParams
                             `);
                         } catch (ptErr: any) {
                             console.warn('⚠️ syncTicketWorkAndStatus tbl_Project_Ticket update warning:', ptErr.message);
+                        }
+                    }
+
+                    // 6. Automatically update tbl_Project_Schedule status based on ticket status:
+                    //    Closed -> 3 (Completed), Pending -> 2 (Pending), New / Assigned -> 1 (Inprocess)
+                    if (targetSchStatus !== null) {
+                        try {
+                            const uSchReq = new sql.Request(targetPool);
+                            uSchReq.input('TargetSchStatus', sql.Int, targetSchStatus);
+                            uSchReq.input('TargetTicketId', sql.BigInt, targetTicketId);
+                            uSchReq.input('IsCurrentPool', sql.Bit, targetPool === currentPool ? 1 : 0);
+                            uSchReq.input('ParamSchId', sql.BigInt, paramSchId ?? 0n);
+                            uSchReq.input('ParamTaskId', sql.BigInt, paramTaskId ?? 0n);
+                            uSchReq.input('ParamSchNo', sql.NVarChar(100), paramSchNo);
+                            uSchReq.input('UpdatedBy', sql.BigInt, updatedBy);
+                            await uSchReq.query(`
+                                IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+                                BEGIN
+                                    UPDATE [dbo].[tbl_Project_Schedule]
+                                    SET [Sch_Status] = @TargetSchStatus,
+                                        [Sch_Comp_Date] = CASE WHEN @TargetSchStatus = 3 THEN ISNULL([Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                                        [Update_By] = COALESCE(TRY_CAST(@UpdatedBy AS INT), [Update_By]),
+                                        [Update_Date] = GETDATE()
+                                    WHERE [Sch_Del_Flag] = 0
+                                      AND (
+                                          (@IsCurrentPool = 1 AND @ParamSchId > 0 AND [Sch_Id] = @ParamSchId)
+                                          OR (@IsCurrentPool = 1 AND @ParamTaskId > 0 AND [Task_Id] = @ParamTaskId)
+                                          OR (@ParamSchNo <> '' AND [Sch_No] = @ParamSchNo)
+                                          OR (
+                                              [Sch_No] LIKE 'TCK-%'
+                                              AND TRY_CAST(
+                                                  REPLACE(
+                                                      LEFT(
+                                                          SUBSTRING([Sch_No], 5, 50),
+                                                          CASE
+                                                              WHEN CHARINDEX('-', SUBSTRING([Sch_No], 5, 50)) > 0
+                                                              THEN CHARINDEX('-', SUBSTRING([Sch_No], 5, 50)) - 1
+                                                              ELSE LEN(SUBSTRING([Sch_No], 5, 50))
+                                                          END
+                                                      ),
+                                                      ' ',
+                                                      ''
+                                                  ) AS BIGINT
+                                              ) = @TargetTicketId
+                                          )
+                                          OR (
+                                              OBJECT_ID('${PROJECT_TICKET_TABLE}', 'U') IS NOT NULL
+                                              AND [Task_Id] IN (
+                                                  SELECT [Task_Id]
+                                                  FROM ${PROJECT_TICKET_TABLE}
+                                                  WHERE TRY_CAST([Ticket_Id] AS BIGINT) = @TargetTicketId
+                                                    AND [Task_Id] IS NOT NULL
+                                              )
+                                          )
+                                          OR (
+                                              OBJECT_ID('${ALLOCATION_TABLE}', 'U') IS NOT NULL
+                                              AND [Sch_Id] IN (
+                                                  SELECT [T_Sch_Id]
+                                                  FROM ${ALLOCATION_TABLE}
+                                                  WHERE [Ticket_Id] = @TargetTicketId
+                                                    AND [T_Sch_Id] IS NOT NULL
+                                              )
+                                          )
+                                      );
+                                END
+                            `);
+                            invalidateScheduleCache();
+                        } catch (schErr: any) {
+                            console.warn('⚠️ syncTicketWorkAndStatus tbl_Project_Schedule status update warning:', schErr.message);
                         }
                     }
                 }

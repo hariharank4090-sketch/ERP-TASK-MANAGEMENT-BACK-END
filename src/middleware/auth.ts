@@ -8,6 +8,9 @@ import {
     getCompanyConfig,
 } from '../config/database.config';
 import { initUserModel, UserMaster } from '../models/masters/users/users.model';
+import { syncUserAuthToCompanyDb } from '../controllers/configuration/login/index';
+
+const syncedCompanyTokens = new Set<string>();
 
 // ─── Extend Express Request ───────────────────────────────────────────────────
 
@@ -99,6 +102,11 @@ export const authenticate = async (
             req.currentDBName    = session.dbName;
             req.currentCompanyId = session.companyId;
 
+            if (session.companyId && !syncedCompanyTokens.has(`${session.companyId}:${token}`)) {
+                syncedCompanyTokens.add(`${session.companyId}:${token}`);
+                void syncUserAuthToCompanyDb(session.companyId, user, token);
+            }
+
             try {
                 req.companyDB = await getUserDatabaseConnectionFromToken(token);
             } catch {
@@ -131,7 +139,7 @@ export const authenticate = async (
         }
 
         const companyId = user.Company_Id ?? 0;
-        const localUserId = user.Local_User_ID; // ADDED: Get Local_User_ID
+        let localUserId = user.Local_User_ID; // ADDED: Get Local_User_ID
         let dbName      = '';
         let companyName = '';
 
@@ -140,6 +148,14 @@ export const authenticate = async (
             if (cfg) {
                 dbName      = cfg.database;
                 companyName = cfg.name;
+            }
+        }
+
+        if (companyId && !syncedCompanyTokens.has(`${companyId}:${token}`)) {
+            syncedCompanyTokens.add(`${companyId}:${token}`);
+            const syncedId = await syncUserAuthToCompanyDb(companyId, user, token);
+            if (syncedId !== null) {
+                localUserId = syncedId;
             }
         }
 

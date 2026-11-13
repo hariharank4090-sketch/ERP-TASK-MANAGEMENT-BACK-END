@@ -255,10 +255,111 @@ export const invalidateScheduleCache = () => {
     scheduleListCache.clear();
 };
 
+export const syncTicketScheduleStatuses = async (db: Sequelize): Promise<void> => {
+    try {
+        await db.query(`
+            IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+               AND OBJECT_ID('[dbo].[tbl_Ticket_Gen_Info]', 'U') IS NOT NULL
+            BEGIN
+                EXEC sp_executesql N'
+                    UPDATE s
+                    SET s.[Sch_Status] = mapped.[Target_Sch_Status],
+                        s.[Sch_Comp_Date] = CASE WHEN mapped.[Target_Sch_Status] = 3 THEN ISNULL(s.[Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                        s.[Update_Date] = GETDATE()
+                    FROM [dbo].[tbl_Project_Schedule] s
+                    INNER JOIN [dbo].[tbl_Ticket_Gen_Info] tk
+                        ON s.[Sch_No] LIKE ''TCK-%''
+                       AND TRY_CAST(
+                            REPLACE(
+                                LEFT(
+                                    SUBSTRING(s.[Sch_No], 5, 50),
+                                    CASE
+                                        WHEN CHARINDEX(''-'', SUBSTRING(s.[Sch_No], 5, 50)) > 0
+                                        THEN CHARINDEX(''-'', SUBSTRING(s.[Sch_No], 5, 50)) - 1
+                                        ELSE LEN(SUBSTRING(s.[Sch_No], 5, 50))
+                                    END
+                                ),
+                                '' '',
+                                ''''
+                            ) AS BIGINT
+                        ) = tk.[Id]
+                    CROSS APPLY (
+                        SELECT CASE
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''closed'' THEN 3
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''pending'' THEN 2
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) IN (''new'', ''assigned'', ''inprocess'', ''in progress'', ''open'') THEN 1
+                            ELSE NULL
+                        END AS [Target_Sch_Status]
+                    ) mapped
+                    WHERE s.[Sch_Del_Flag] = 0
+                      AND mapped.[Target_Sch_Status] IS NOT NULL
+                      AND ISNULL(s.[Sch_Status], 0) <> mapped.[Target_Sch_Status];
+                ';
+            END
+
+            IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+               AND OBJECT_ID('[dbo].[tbl_Project_Ticket]', 'U') IS NOT NULL
+               AND OBJECT_ID('[dbo].[tbl_Ticket_Gen_Info]', 'U') IS NOT NULL
+            BEGIN
+                EXEC sp_executesql N'
+                    UPDATE s
+                    SET s.[Sch_Status] = mapped.[Target_Sch_Status],
+                        s.[Sch_Comp_Date] = CASE WHEN mapped.[Target_Sch_Status] = 3 THEN ISNULL(s.[Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                        s.[Update_Date] = GETDATE()
+                    FROM [dbo].[tbl_Project_Schedule] s
+                    INNER JOIN [dbo].[tbl_Project_Ticket] pt ON pt.[Task_Id] = s.[Task_Id]
+                    INNER JOIN [dbo].[tbl_Ticket_Gen_Info] tk ON TRY_CAST(pt.[Ticket_Id] AS BIGINT) = tk.[Id]
+                    CROSS APPLY (
+                        SELECT CASE
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''closed'' THEN 3
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''pending'' THEN 2
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) IN (''new'', ''assigned'', ''inprocess'', ''in progress'', ''open'') THEN 1
+                            ELSE NULL
+                        END AS [Target_Sch_Status]
+                    ) mapped
+                    WHERE s.[Sch_Del_Flag] = 0
+                      AND mapped.[Target_Sch_Status] IS NOT NULL
+                      AND ISNULL(s.[Sch_Status], 0) <> mapped.[Target_Sch_Status];
+                ';
+            END
+
+            IF OBJECT_ID('[dbo].[tbl_Project_Schedule]', 'U') IS NOT NULL
+               AND OBJECT_ID('[dbo].[tbl_Ticket_Alloctation]', 'U') IS NOT NULL
+               AND OBJECT_ID('[dbo].[tbl_Ticket_Gen_Info]', 'U') IS NOT NULL
+            BEGIN
+                EXEC sp_executesql N'
+                    UPDATE s
+                    SET s.[Sch_Status] = mapped.[Target_Sch_Status],
+                        s.[Sch_Comp_Date] = CASE WHEN mapped.[Target_Sch_Status] = 3 THEN ISNULL(s.[Sch_Comp_Date], GETDATE()) ELSE NULL END,
+                        s.[Update_Date] = GETDATE()
+                    FROM [dbo].[tbl_Project_Schedule] s
+                    INNER JOIN [dbo].[tbl_Ticket_Alloctation] a ON a.[T_Sch_Id] = s.[Sch_Id]
+                    INNER JOIN [dbo].[tbl_Ticket_Gen_Info] tk ON a.[Ticket_Id] = tk.[Id]
+                    CROSS APPLY (
+                        SELECT CASE
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''closed'' THEN 3
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) = ''pending'' THEN 2
+                            WHEN LOWER(LTRIM(RTRIM(ISNULL(tk.[Status], '''')))) IN (''new'', ''assigned'', ''inprocess'', ''in progress'', ''open'') THEN 1
+                            ELSE NULL
+                        END AS [Target_Sch_Status]
+                    ) mapped
+                    WHERE s.[Sch_Del_Flag] = 0
+                      AND mapped.[Target_Sch_Status] IS NOT NULL
+                      AND ISNULL(s.[Sch_Status], 0) <> mapped.[Target_Sch_Status];
+                ';
+            END
+        `);
+    } catch (err: any) {
+        console.warn('⚠️ syncTicketScheduleStatuses warning:', err.message);
+    }
+};
+
 export const getAllSchedules = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
+
+        await syncTicketScheduleStatuses(db);
 
         const validation = validateWithZod<ScheduleQuery>(ScheduleQuerySchema, req.query);
         if (!validation.success) {
@@ -465,6 +566,8 @@ export const getScheduleById = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
+
+        await syncTicketScheduleStatuses(db);
 
         const validation = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
         if (!validation.success) {
@@ -942,6 +1045,8 @@ export const createSchedule = async (req: Request, res: Response) => {
             await transaction.commit();
             isTransactionActive = false;
             transaction = null;
+
+            await syncTicketScheduleStatuses(db);
 
             const data = await db.query(
                 `SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
@@ -1542,6 +1647,8 @@ export const getAllActiveSchedules = async (req: Request, res: Response) => {
     try {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
+
+        await syncTicketScheduleStatuses(db);
 
         const rows = await db.query(
             `WITH ExtensionCounts AS (
