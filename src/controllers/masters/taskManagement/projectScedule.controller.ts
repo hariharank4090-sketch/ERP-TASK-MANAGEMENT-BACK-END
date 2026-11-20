@@ -20,6 +20,7 @@ import {
     ScheduleQuery,
     ScheduleStatusUpdate
 } from '../../../models/masters/ProjectSchedule/schedule.type.model';
+import { invalidateTaskDetailCache } from './projectScheduleEmp.controller';
 
 // Helper to get database from request (using companyDB from auth middleware)
 const getDb = (req: Request): Sequelize => {
@@ -253,6 +254,90 @@ const SCHEDULE_CACHE_TTL = 5000; // 5 seconds cache
 
 export const invalidateScheduleCache = () => {
     scheduleListCache.clear();
+    try {
+        invalidateTaskDetailCache();
+    } catch {
+        // ignore
+    }
+};
+
+export const DEFAULT_SCHEDULE_PLANS: Array<{ value: number; label: string }> = [
+    { value: 1, label: 'Time Based' },
+    { value: 2, label: 'Day Based' },
+    { value: 3, label: 'Weekly Based' },
+    { value: 4, label: 'Monthly Based' },
+    { value: 5, label: 'Specific Day' }
+];
+
+export const resolvePlanTypeName = (
+    rawPlanType: any,
+    schPlanId?: any,
+    schType?: any
+): string => {
+    if (typeof rawPlanType === 'string' && rawPlanType.trim() !== '' && isNaN(Number(rawPlanType.trim()))) {
+        return rawPlanType.trim();
+    }
+    const planIdNum = Number(schPlanId ?? rawPlanType);
+    const found = DEFAULT_SCHEDULE_PLANS.find(p => p.value === planIdNum);
+    if (found) return found.label;
+
+    const schTypeNum = Number(schType);
+    if (schTypeNum === 1) return 'Specific Day';
+    if (schTypeNum === 2) return 'Time Based';
+    return 'Time Based';
+};
+
+const seededPlanDbs = new WeakSet<Sequelize>();
+
+export const ensureSchPlanTableSeeded = async (db: Sequelize): Promise<void> => {
+    if (seededPlanDbs.has(db)) return;
+    try {
+        await db.query(`
+            IF OBJECT_ID('[dbo].[tbl_Sch_Plan]', 'U') IS NULL
+            BEGIN
+                CREATE TABLE [dbo].[tbl_Sch_Plan] (
+                    [Plan_Id] INT PRIMARY KEY,
+                    [Plan_Type] NVARCHAR(100) NOT NULL,
+                    [Plan_Desc] NVARCHAR(255) NULL
+                );
+            END
+
+            IF OBJECT_ID('[dbo].[tbl_Sch_Plan]', 'U') IS NOT NULL
+            BEGIN
+                IF COLUMNPROPERTY(OBJECT_ID('[dbo].[tbl_Sch_Plan]'), 'Plan_Id', 'IsIdentity') = 1
+                BEGIN
+                    SET IDENTITY_INSERT [dbo].[tbl_Sch_Plan] ON;
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 1)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (1, 'Time Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 2)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (2, 'Day Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 3)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (3, 'Weekly Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 4)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (4, 'Monthly Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 5)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (5, 'Specific Day');
+                    SET IDENTITY_INSERT [dbo].[tbl_Sch_Plan] OFF;
+                END
+                ELSE
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 1)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (1, 'Time Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 2)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (2, 'Day Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 3)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (3, 'Weekly Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 4)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (4, 'Monthly Based');
+                    IF NOT EXISTS (SELECT 1 FROM [dbo].[tbl_Sch_Plan] WHERE [Plan_Id] = 5)
+                        INSERT INTO [dbo].[tbl_Sch_Plan] ([Plan_Id], [Plan_Type]) VALUES (5, 'Specific Day');
+                END
+            END
+        `);
+        seededPlanDbs.add(db);
+    } catch (err: any) {
+        console.warn('⚠️ ensureSchPlanTableSeeded warning:', err.message);
+    }
 };
 
 export const syncTicketScheduleStatuses = async (db: Sequelize): Promise<void> => {
@@ -359,6 +444,7 @@ export const getAllSchedules = async (req: Request, res: Response) => {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
 
+        await ensureSchPlanTableSeeded(db);
         await syncTicketScheduleStatuses(db);
 
         const validation = validateWithZod<ScheduleQuery>(ScheduleQuerySchema, req.query);
@@ -428,7 +514,18 @@ export const getAllSchedules = async (req: Request, res: Response) => {
 
         const schedulesQuery = `
             SELECT
-                s.*, t.Task_Name, p.Plan_Type,
+                s.*, t.Task_Name,
+                COALESCE(
+                    NULLIF(LTRIM(RTRIM(p.Plan_Type)), ''),
+                    CASE s.Sch_Plan_Id
+                        WHEN 1 THEN 'Time Based'
+                        WHEN 2 THEN 'Day Based'
+                        WHEN 3 THEN 'Weekly Based'
+                        WHEN 4 THEN 'Monthly Based'
+                        WHEN 5 THEN 'Specific Day'
+                        ELSE CASE WHEN s.Sch_Type = 1 THEN 'Specific Day' WHEN s.Sch_Type = 2 THEN 'Time Based' ELSE 'Time Based' END
+                    END
+                ) as Plan_Type,
                 pm.Project_Name, pm.Project_Id,
                 COALESCE(tc.empCount, 0) as empCount,
                 CASE WHEN COALESCE(ec.extCount, 0) > 0 THEN 1 ELSE 0 END as hasExtension
@@ -514,37 +611,41 @@ export const getAllSchedules = async (req: Request, res: Response) => {
             });
         });
 
-        const formattedSchedules = schedules.map((schedule: any) => ({
-            schId: schedule.Sch_Id,
-            schNo: schedule.Sch_No,
-            schDate: schedule.Sch_Date,
-            Task_Id: schedule.Task_Id,
-            Task_Name: schedule.Task_Name,
-            TaskTypeId: schedule.Task_Type_Id,
-            schPlanId: schedule.Sch_Plan_Id,
-            schType: schedule.Sch_Type,
-            Project_Id: schedule.Project_Id,
-            Project_Name: schedule.Project_Name,
-            planType: schedule.Plan_Type,
-            schStartDate: schedule.Sch_Start_Date,
-            schEndDate: schedule.Sch_End_Date,
-            schFirstStartDate: schedule.Sch_First_Start_Date,
-            schFirstEndDate: schedule.Sch_First_End_Date,
-            taskSchTimerBased: schedule.Task_Sch_Timer_Based,
-            schEstStartTime: schedule.Sch_Est_Start_Time,
-            schEstEndTime: schedule.Sch_Est_End_Time,
-            taskSchDuration: schedule.Task_Sch_Duaration,
-            schStatus: schedule.Sch_Status,
-            empCount: schedule.empCount,
-            hasExtension: schedule.hasExtension,
-            schCompDate: schedule.Sch_Comp_Date,
-            entryBy: schedule.Entry_By,
-            entryDate: schedule.Entry_Date,
-            updateBy: schedule.Update_By,
-            updateDate: schedule.Update_Date,
-            taskDates: taskDatesByScheduleId[schedule.Sch_Id] || [],
-            planDetails: planDetailsByScheduleId[schedule.Sch_Id] || []
-        }));
+        const formattedSchedules = schedules.map((schedule: any) => {
+            const resolvedPlan = resolvePlanTypeName(schedule.Plan_Type, schedule.Sch_Plan_Id, schedule.Sch_Type);
+            return {
+                schId: schedule.Sch_Id,
+                schNo: schedule.Sch_No,
+                schDate: schedule.Sch_Date,
+                Task_Id: schedule.Task_Id,
+                Task_Name: schedule.Task_Name,
+                TaskTypeId: schedule.Task_Type_Id,
+                schPlanId: schedule.Sch_Plan_Id,
+                schType: schedule.Sch_Type,
+                Project_Id: schedule.Project_Id,
+                Project_Name: schedule.Project_Name,
+                planType: resolvedPlan,
+                Plan_Type: resolvedPlan,
+                schStartDate: schedule.Sch_Start_Date,
+                schEndDate: schedule.Sch_End_Date,
+                schFirstStartDate: schedule.Sch_First_Start_Date,
+                schFirstEndDate: schedule.Sch_First_End_Date,
+                taskSchTimerBased: schedule.Task_Sch_Timer_Based,
+                schEstStartTime: schedule.Sch_Est_Start_Time,
+                schEstEndTime: schedule.Sch_Est_End_Time,
+                taskSchDuration: schedule.Task_Sch_Duaration,
+                schStatus: schedule.Sch_Status,
+                empCount: schedule.empCount,
+                hasExtension: schedule.hasExtension,
+                schCompDate: schedule.Sch_Comp_Date,
+                entryBy: schedule.Entry_By,
+                entryDate: schedule.Entry_Date,
+                updateBy: schedule.Update_By,
+                updateDate: schedule.Update_Date,
+                taskDates: taskDatesByScheduleId[schedule.Sch_Id] || [],
+                planDetails: planDetailsByScheduleId[schedule.Sch_Id] || []
+            };
+        });
 
         const responsePayload = {
             success: true,
@@ -567,6 +668,7 @@ export const getScheduleById = async (req: Request, res: Response) => {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
 
+        await ensureSchPlanTableSeeded(db);
         await syncTicketScheduleStatuses(db);
 
         const validation = validateWithZod<{ id: number }>(ScheduleIdSchema, req.params);
@@ -575,7 +677,19 @@ export const getScheduleById = async (req: Request, res: Response) => {
         }
 
         const query = `
-            SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
+            SELECT s.*, t.Task_Name,
+                   COALESCE(
+                       NULLIF(LTRIM(RTRIM(p.Plan_Type)), ''),
+                       CASE s.Sch_Plan_Id
+                           WHEN 1 THEN 'Time Based'
+                           WHEN 2 THEN 'Day Based'
+                           WHEN 3 THEN 'Weekly Based'
+                           WHEN 4 THEN 'Monthly Based'
+                           WHEN 5 THEN 'Specific Day'
+                           ELSE CASE WHEN s.Sch_Type = 1 THEN 'Specific Day' WHEN s.Sch_Type = 2 THEN 'Time Based' ELSE 'Time Based' END
+                       END
+                   ) as Plan_Type,
+                   pm.Project_Name, pm.Project_Id
             FROM tbl_Project_Schedule s
             LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
             LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
@@ -592,7 +706,8 @@ export const getScheduleById = async (req: Request, res: Response) => {
         const planDtQuery = `SELECT * FROM tbl_Project_Sch_DT WHERE Sch_Id = ?`;
         const planDt = await db.query(planDtQuery, { replacements: [validation.data!.id], type: QueryTypes.SELECT }) as any[];
 
-        sentData(res, { ...rows[0], taskDates: details, planDetails: planDt });
+        const resolvedPlan = resolvePlanTypeName(rows[0].Plan_Type, rows[0].Sch_Plan_Id, rows[0].Sch_Type);
+        sentData(res, { ...rows[0], Plan_Type: resolvedPlan, planType: resolvedPlan, taskDates: details, planDetails: planDt });
     } catch (e) {
         console.error('Error in getScheduleById:', e);
         servError(e, res);
@@ -899,7 +1014,8 @@ export const createSchedule = async (req: Request, res: Response) => {
             Entry_By,
             planDetails,
             selectedDays,
-            specificDates
+            specificDates,
+            Ticket_Id
         } = validation.data!;
 
         let Sch_Start_Date = validation.data!.Sch_Start_Date;
@@ -942,6 +1058,13 @@ export const createSchedule = async (req: Request, res: Response) => {
         const safeEstEnd = Sch_Est_End_Time ?? null;
         const safeDuration = Task_Sch_Duaration ?? null;
         const safeEntryBy = Entry_By ?? null;
+        let safeTicketId = Ticket_Id ?? (req.body.Ticket_Id ? Number(req.body.Ticket_Id) : null);
+        if (!safeTicketId && Sch_No) {
+            const m = String(Sch_No).match(/TCK-0*(\d+)/i);
+            if (m && m[1]) {
+                safeTicketId = Number(m[1]);
+            }
+        }
 
         transaction = await db.transaction();
         isTransactionActive = true;
@@ -968,43 +1091,83 @@ export const createSchedule = async (req: Request, res: Response) => {
             const Sch_First_Start_Date = validation.data!.Sch_First_Start_Date || Sch_Start_Date;
             const Sch_First_End_Date = validation.data!.Sch_First_End_Date || Sch_End_Date;
 
-            // Columns (20): Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
-            // Sch_Type, Sch_Start_Date, Sch_End_Date, Sch_First_Start_Date, Sch_First_End_Date,
-            // Task_Sch_Timer_Based, Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
-            // Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date
-            await db.query(
-                `INSERT INTO tbl_Project_Schedule
-                 (Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
-                  Sch_Type,
-                  Sch_Start_Date, Sch_End_Date, Sch_First_Start_Date, Sch_First_End_Date, Task_Sch_Timer_Based,
-                  Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
-                  Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, CASE WHEN ? = 3 THEN GETDATE() ELSE NULL END)`,
-                {
-                    replacements: [
-                        nextSchId,
-                        autoSchNo,
-                        formatDateForSQL(Sch_Date || new Date()),
-                        Task_Id,
-                        Task_Type_Id,
-                        Sch_Plan_Id,
-                        safeSchType,
-                        formatDateForSQL(Sch_Start_Date),
-                        formatDateForSQL(Sch_End_Date),
-                        formatDateForSQL(Sch_First_Start_Date),
-                        formatDateForSQL(Sch_First_End_Date),
-                        safeTimerBased,
-                        safeEstStart,
-                        safeEstEnd,
-                        safeDuration,
-                        Sch_Status,
-                        safeEntryBy,
-                        Sch_Status
-                    ],
-                    type: QueryTypes.INSERT,
-                    transaction
-                }
-            );
+            // Check if Ticket_Id column exists in tbl_Project_Schedule
+            const colCheck = await db.query(
+                `SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('tbl_Project_Schedule') AND name = 'Ticket_Id'`,
+                { type: QueryTypes.SELECT, transaction }
+            ) as any[];
+            const hasTicketIdCol = colCheck && colCheck.length > 0;
+
+            if (hasTicketIdCol) {
+                await db.query(
+                    `INSERT INTO tbl_Project_Schedule
+                     (Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
+                      Sch_Type,
+                      Sch_Start_Date, Sch_End_Date, Sch_First_Start_Date, Sch_First_End_Date, Task_Sch_Timer_Based,
+                      Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
+                      Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date, Ticket_Id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, CASE WHEN ? = 3 THEN GETDATE() ELSE NULL END, ?)`,
+                    {
+                        replacements: [
+                            nextSchId,
+                            autoSchNo,
+                            formatDateForSQL(Sch_Date || new Date()),
+                            Task_Id,
+                            Task_Type_Id,
+                            Sch_Plan_Id,
+                            safeSchType,
+                            formatDateForSQL(Sch_Start_Date),
+                            formatDateForSQL(Sch_End_Date),
+                            formatDateForSQL(Sch_First_Start_Date),
+                            formatDateForSQL(Sch_First_End_Date),
+                            safeTimerBased,
+                            safeEstStart,
+                            safeEstEnd,
+                            safeDuration,
+                            Sch_Status,
+                            safeEntryBy,
+                            Sch_Status,
+                            safeTicketId
+                        ],
+                        type: QueryTypes.INSERT,
+                        transaction
+                    }
+                );
+            } else {
+                await db.query(
+                    `INSERT INTO tbl_Project_Schedule
+                     (Sch_Id, Sch_No, Sch_Date, Task_Id, Task_Type_Id, Sch_Plan_Id,
+                      Sch_Type,
+                      Sch_Start_Date, Sch_End_Date, Sch_First_Start_Date, Sch_First_End_Date, Task_Sch_Timer_Based,
+                      Sch_Est_Start_Time, Sch_Est_End_Time, Task_Sch_Duaration,
+                      Sch_Status, Entry_By, Entry_Date, Sch_Del_Flag, Sch_Comp_Date)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 0, CASE WHEN ? = 3 THEN GETDATE() ELSE NULL END)`,
+                    {
+                        replacements: [
+                            nextSchId,
+                            autoSchNo,
+                            formatDateForSQL(Sch_Date || new Date()),
+                            Task_Id,
+                            Task_Type_Id,
+                            Sch_Plan_Id,
+                            safeSchType,
+                            formatDateForSQL(Sch_Start_Date),
+                            formatDateForSQL(Sch_End_Date),
+                            formatDateForSQL(Sch_First_Start_Date),
+                            formatDateForSQL(Sch_First_End_Date),
+                            safeTimerBased,
+                            safeEstStart,
+                            safeEstEnd,
+                            safeDuration,
+                            Sch_Status,
+                            safeEntryBy,
+                            Sch_Status
+                        ],
+                        type: QueryTypes.INSERT,
+                        transaction
+                    }
+                );
+            }
 
             // Insert plan detail rows for non-Plan 5 schedules
             if (Sch_Plan_Id !== 5) {
@@ -1046,10 +1209,23 @@ export const createSchedule = async (req: Request, res: Response) => {
             isTransactionActive = false;
             transaction = null;
 
+            await ensureSchPlanTableSeeded(db);
             await syncTicketScheduleStatuses(db);
 
             const data = await db.query(
-                `SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
+                `SELECT s.*, t.Task_Name,
+                        COALESCE(
+                            NULLIF(LTRIM(RTRIM(p.Plan_Type)), ''),
+                            CASE s.Sch_Plan_Id
+                                WHEN 1 THEN 'Time Based'
+                                WHEN 2 THEN 'Day Based'
+                                WHEN 3 THEN 'Weekly Based'
+                                WHEN 4 THEN 'Monthly Based'
+                                WHEN 5 THEN 'Specific Day'
+                                ELSE CASE WHEN s.Sch_Type = 1 THEN 'Specific Day' WHEN s.Sch_Type = 2 THEN 'Time Based' ELSE 'Time Based' END
+                            END
+                        ) as Plan_Type,
+                        pm.Project_Name, pm.Project_Id
                  FROM tbl_Project_Schedule s
                  LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
                  LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
@@ -1073,8 +1249,11 @@ export const createSchedule = async (req: Request, res: Response) => {
 
             invalidateScheduleCache();
 
+            const createdPlan = resolvePlanTypeName(data[0]?.Plan_Type, data[0]?.Sch_Plan_Id, data[0]?.Sch_Type);
             return created(res, {
                 ...data[0],
+                Plan_Type: createdPlan,
+                planType: createdPlan,
                 taskDates: taskDatesResult,
                 planDetails: planDt
             }, 'Project schedule created successfully');
@@ -1246,6 +1425,19 @@ export const updateSchedule = async (req: Request, res: Response) => {
             }
 
             if (updateData.Update_By !== undefined) { updateFields.push('Update_By = ?'); updateValues.push(updateData.Update_By); }
+
+            const ticketIdToUpdate = updateData.Ticket_Id !== undefined ? updateData.Ticket_Id : (req.body as any).Ticket_Id;
+            if (ticketIdToUpdate !== undefined) {
+                const colCheck = await db.query(
+                    `SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('tbl_Project_Schedule') AND name = 'Ticket_Id'`,
+                    { type: QueryTypes.SELECT, transaction }
+                ) as any[];
+                if (colCheck && colCheck.length > 0) {
+                    updateFields.push('Ticket_Id = ?');
+                    updateValues.push(ticketIdToUpdate ? Number(ticketIdToUpdate) : null);
+                }
+            }
+
             updateFields.push('Update_Date = GETDATE()');
 
             const getCurrentValue = async (field: string): Promise<any> => {
@@ -1414,9 +1606,23 @@ export const updateSchedule = async (req: Request, res: Response) => {
             isTransactionActive = false;
             transaction = null;
 
+            await ensureSchPlanTableSeeded(db);
+
             // Return the updated record
             const data = await db.query(
-                `SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
+                `SELECT s.*, t.Task_Name,
+                        COALESCE(
+                            NULLIF(LTRIM(RTRIM(p.Plan_Type)), ''),
+                            CASE s.Sch_Plan_Id
+                                WHEN 1 THEN 'Time Based'
+                                WHEN 2 THEN 'Day Based'
+                                WHEN 3 THEN 'Weekly Based'
+                                WHEN 4 THEN 'Monthly Based'
+                                WHEN 5 THEN 'Specific Day'
+                                ELSE CASE WHEN s.Sch_Type = 1 THEN 'Specific Day' WHEN s.Sch_Type = 2 THEN 'Time Based' ELSE 'Time Based' END
+                            END
+                        ) as Plan_Type,
+                        pm.Project_Name, pm.Project_Id
                  FROM tbl_Project_Schedule s
                  LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
                  LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
@@ -1437,7 +1643,8 @@ export const updateSchedule = async (req: Request, res: Response) => {
 
             invalidateScheduleCache();
 
-            return updated(res, { ...data[0], taskDates: taskDatesResult, planDetails: planDt }, 'Project schedule updated successfully');
+            const updatedPlan = resolvePlanTypeName(data[0]?.Plan_Type, data[0]?.Sch_Plan_Id, data[0]?.Sch_Type);
+            return updated(res, { ...data[0], Plan_Type: updatedPlan, planType: updatedPlan, taskDates: taskDatesResult, planDetails: planDt }, 'Project schedule updated successfully');
 
         } catch (error) {
             console.error('Error during transaction operations:', error);
@@ -1511,9 +1718,23 @@ export const updateScheduleStatus = async (req: Request, res: Response) => {
             { replacements: [status, updateBy, scheduleId] }
         );
 
+        await ensureSchPlanTableSeeded(db);
+
         // Fetch updated record to return
         const updatedRecord = await db.query(
-            `SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id
+            `SELECT s.*, t.Task_Name,
+                    COALESCE(
+                        NULLIF(LTRIM(RTRIM(p.Plan_Type)), ''),
+                        CASE s.Sch_Plan_Id
+                            WHEN 1 THEN 'Time Based'
+                            WHEN 2 THEN 'Day Based'
+                            WHEN 3 THEN 'Weekly Based'
+                            WHEN 4 THEN 'Monthly Based'
+                            WHEN 5 THEN 'Specific Day'
+                            ELSE CASE WHEN s.Sch_Type = 1 THEN 'Specific Day' WHEN s.Sch_Type = 2 THEN 'Time Based' ELSE 'Time Based' END
+                        END
+                    ) as Plan_Type,
+                    pm.Project_Name, pm.Project_Id
              FROM tbl_Project_Schedule s
              LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
              LEFT JOIN tbl_Project_Master pm ON t.Project_Id = pm.Project_Id
@@ -1533,8 +1754,13 @@ export const updateScheduleStatus = async (req: Request, res: Response) => {
             { replacements: [scheduleId], type: QueryTypes.SELECT }
         ) as any[];
 
+        const statusPlan = updatedRecord[0]
+            ? resolvePlanTypeName(updatedRecord[0].Plan_Type, updatedRecord[0].Sch_Plan_Id, updatedRecord[0].Sch_Type)
+            : '';
         const responseData = updatedRecord[0] ? {
             ...updatedRecord[0],
+            Plan_Type: statusPlan,
+            planType: statusPlan,
             taskDates: taskDatesResult,
             planDetails: planDt
         } : null;
@@ -1578,15 +1804,37 @@ export const getSchedulePlansDropdown = async (req: Request, res: Response) => {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
 
-        const rows = await db.query(
-            `SELECT Plan_Id as value, Plan_Type as label FROM tbl_Sch_Plan ORDER BY Plan_Id`,
-            { type: QueryTypes.SELECT }
-        ) as any[];
+        await ensureSchPlanTableSeeded(db);
 
-        sentData(res, rows);
+        let rows: any[] = [];
+        try {
+            rows = await db.query(
+                `SELECT Plan_Id as value, Plan_Type as label FROM tbl_Sch_Plan ORDER BY Plan_Id`,
+                { type: QueryTypes.SELECT }
+            ) as any[];
+        } catch (dbErr: any) {
+            console.warn('⚠️ getSchedulePlansDropdown table query warning, using defaults:', dbErr.message);
+        }
+
+        const mergedMap = new Map<number, { value: number; label: string }>();
+        for (const def of DEFAULT_SCHEDULE_PLANS) {
+            mergedMap.set(def.value, { ...def });
+        }
+        for (const row of rows || []) {
+            const val = Number(row?.value ?? row?.Plan_Id);
+            const lbl = typeof (row?.label ?? row?.Plan_Type) === 'string'
+                ? String(row?.label ?? row?.Plan_Type).trim()
+                : '';
+            if (val > 0 && lbl) {
+                mergedMap.set(val, { value: val, label: lbl });
+            }
+        }
+
+        const finalPlans = Array.from(mergedMap.values()).sort((a, b) => a.value - b.value);
+        sentData(res, finalPlans);
     } catch (e) {
         console.error('Error in getSchedulePlansDropdown:', e);
-        servError(e, res);
+        sentData(res, DEFAULT_SCHEDULE_PLANS);
     }
 };
 
@@ -1648,6 +1896,7 @@ export const getAllActiveSchedules = async (req: Request, res: Response) => {
         const db = getDb(req);
         const currentDBName = getCurrentDatabaseName(req);
 
+        await ensureSchPlanTableSeeded(db);
         await syncTicketScheduleStatuses(db);
 
         const rows = await db.query(
@@ -1656,7 +1905,19 @@ export const getAllActiveSchedules = async (req: Request, res: Response) => {
                 FROM tbl_Project_Schedule_Extend
                 GROUP BY Sch_Id
              )
-             SELECT s.*, t.Task_Name, p.Plan_Type, pm.Project_Name, pm.Project_Id,
+             SELECT s.*, t.Task_Name,
+                    COALESCE(
+                        NULLIF(LTRIM(RTRIM(p.Plan_Type)), ''),
+                        CASE s.Sch_Plan_Id
+                            WHEN 1 THEN 'Time Based'
+                            WHEN 2 THEN 'Day Based'
+                            WHEN 3 THEN 'Weekly Based'
+                            WHEN 4 THEN 'Monthly Based'
+                            WHEN 5 THEN 'Specific Day'
+                            ELSE CASE WHEN s.Sch_Type = 1 THEN 'Specific Day' WHEN s.Sch_Type = 2 THEN 'Time Based' ELSE 'Time Based' END
+                        END
+                    ) as Plan_Type,
+                    pm.Project_Name, pm.Project_Id,
                     CASE WHEN COALESCE(ec.extCount, 0) > 0 THEN 1 ELSE 0 END as hasExtension
              FROM tbl_Project_Schedule s
              LEFT JOIN tbl_Task t ON s.Task_Id = t.Task_Id
@@ -1668,7 +1929,16 @@ export const getAllActiveSchedules = async (req: Request, res: Response) => {
             { type: QueryTypes.SELECT }
         ) as any[];
 
-        sentData(res, rows);
+        const normalizedRows = (rows || []).map((r: any) => {
+            const resolvedPlan = resolvePlanTypeName(r.Plan_Type, r.Sch_Plan_Id, r.Sch_Type);
+            return {
+                ...r,
+                Plan_Type: resolvedPlan,
+                planType: resolvedPlan
+            };
+        });
+
+        sentData(res, normalizedRows);
     } catch (e) {
         console.error('Error in getAllActiveSchedules:', e);
         servError(e, res);

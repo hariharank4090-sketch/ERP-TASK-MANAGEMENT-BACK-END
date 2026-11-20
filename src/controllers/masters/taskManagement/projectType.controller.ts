@@ -78,16 +78,16 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     }
     
     // Add your permission logic here based on UserTypeId
-    if (requiredPermission === 'create_projects' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
+    if (requiredPermission === 'create_projects' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
-    if (requiredPermission === 'update_projects' && ![1, 2].includes(user.UserTypeId)) {
+    if (requiredPermission === 'update_projects' && ![1, 2].includes(Number(user.UserTypeId))) {
         return false;
     }
-    if (requiredPermission === 'delete_projects' && user.UserTypeId !== 1) {
+    if (requiredPermission === 'delete_projects' && Number(user.UserTypeId) !== 1) {
         return false;
     }
-    if (requiredPermission === 'view_projects' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
+    if (requiredPermission === 'view_projects' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
     

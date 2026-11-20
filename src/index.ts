@@ -6,6 +6,8 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
 import swaggerUi from 'swagger-ui-express';
 
 import { sequelize, getConnectionStats, closeAllCompanyConnections } from './config/database.config';
@@ -42,17 +44,102 @@ const MIME_BY_EXT: Record<string, string> = {
     '.aac': 'audio/aac',
     '.weba': 'audio/webm',
     '.flac': 'audio/flac',
+    '.opus': 'audio/opus',
+    '.wma': 'audio/x-ms-wma',
     '.mp4': 'video/mp4',
     '.webm': 'video/webm',
     '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska',
+    '.avi': 'video/x-msvideo',
+    '.wmv': 'video/x-ms-wmv',
+    '.m4v': 'video/x-m4v',
+    '.ogv': 'video/ogg',
+    '.3gp': 'video/3gpp',
     '.pdf': 'application/pdf',
     '.txt': 'text/plain; charset=utf-8',
+    '.csv': 'text/csv; charset=utf-8',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.jpeg': 'image/jpeg',
     '.jpg': 'image/jpeg',
     '.png': 'image/png',
     '.gif': 'image/gif',
     '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
 };
+
+const getCompanyJsonTicketingBases = (): string[] => {
+    const candidates = [
+        process.env.COMPANIES_FILE,
+        path.resolve(process.cwd(), 'companies.json'),
+        path.resolve(__dirname, '../companies.json'),
+    ].filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+
+    for (const filePath of candidates) {
+        try {
+            if (!fs.existsSync(filePath)) continue;
+            const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            const collected: string[] = [];
+
+            const addUrl = (val: unknown) => {
+                if (typeof val === 'string' && val.trim() !== '') {
+                    collected.push(val);
+                } else if (Array.isArray(val)) {
+                    for (const item of val) {
+                        if (typeof item === 'string' && item.trim() !== '') {
+                            collected.push(item);
+                        }
+                    }
+                }
+            };
+
+            addUrl(parsed?.ticketingUploadUrls);
+            addUrl(parsed?.ticketUploadUrls);
+            addUrl(parsed?.ticketingBaseUrl);
+
+            if (Array.isArray(parsed?.companies)) {
+                for (const c of parsed.companies) {
+                    addUrl(c?.ticketingUploadUrls);
+                    addUrl(c?.ticketingUploadUrl);
+                    addUrl(c?.ticketUploadUrl);
+                    addUrl(c?.ticketingUrl);
+                }
+            }
+
+            return collected
+                .flatMap((val) => val.split(','))
+                .map((val) => val.trim().replace(/\/+$/, '').replace(/\/api$/i, ''))
+                .filter((val) => /^https?:\/\//i.test(val));
+        } catch {
+            // ignore malformed or unreadable companies.json and try next candidate
+        }
+    }
+
+    return [];
+};
+
+const getRemoteTicketingUploadBases = (): string[] => {
+    const envBases = [
+        process.env.TICKETING_UPLOADS_BASE_URL,
+        process.env.TICKETING_API_URL,
+    ]
+        .filter((val): val is string => typeof val === 'string' && val.trim() !== '')
+        .flatMap((val) => val.split(','))
+        .map((val) => val.trim().replace(/\/+$/, '').replace(/\/api$/i, ''))
+        .filter((val) => /^https?:\/\//i.test(val));
+
+    const companyBases = getCompanyJsonTicketingBases();
+
+    return [...new Set([
+        ...envBases,
+        ...companyBases,
+    ])];
+};
+
+const inFlightTicketDownloads = new Map<string, Promise<string | null>>();
 
 const sendTicketMediaFile = (res: express.Response, filePath: string, requestedExt?: string) => {
     const actualExt = path.extname(filePath).toLowerCase();
@@ -62,53 +149,274 @@ const sendTicketMediaFile = (res: express.Response, filePath: string, requestedE
     }
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     return res.sendFile(filePath);
 };
 
-const serveTicketUploadFallback: express.RequestHandler = (req, res, next) => {
-    const rawFile = req.params.filename || '';
-    const safeFile = path.basename(rawFile);
-    if (!safeFile) return next();
-
-    const candidateDirs = [
-        path.join(uploadsDirPath, 'Tickets'),
-        path.join(uploadsDirPath, 'tickets'),
-        path.join(externalTicketingUploadsPath, 'Tickets'),
-    ];
-
-    const ext = path.extname(safeFile).toLowerCase();
-
-    for (const dir of candidateDirs) {
-        const exactPath = path.join(dir, safeFile);
-        if (fs.existsSync(exactPath) && fs.statSync(exactPath).isFile()) {
-            return sendTicketMediaFile(res, exactPath, ext);
+const requestRemoteTicketMedia = (
+    targetUrl: string,
+    method: 'GET' | 'HEAD',
+    rangeHeader: string | undefined,
+    redirectCount = 0
+): Promise<http.IncomingMessage | null> => {
+    return new Promise((resolve) => {
+        let parsed: URL;
+        try {
+            parsed = new URL(targetUrl);
+        } catch {
+            return resolve(null);
         }
-    }
 
-    // Fallback for shared DB ticket attachments (TCK_*) when exact file was uploaded on another machine
-    if (ext) {
-        const isAudioExt = /^\.(mp3|wav|ogg|oga|m4a|aac|weba|flac)$/i.test(ext);
-        const isVideoExt = /^\.(mp4|webm|mov|mkv|avi|wmv)$/i.test(ext);
-        const isImageExt = /^\.(jpeg|jpg|png|gif|webp|bmp)$/i.test(ext);
+        const client = parsed.protocol === 'https:' ? https : http;
+        const headers: Record<string, string> = {};
+        if (rangeHeader) {
+            headers['Range'] = rangeHeader;
+        }
+
+        const upstreamReq = client.request(
+            parsed,
+            {
+                method,
+                headers,
+                timeout: 15000,
+            },
+            (upstreamRes) => {
+                const status = upstreamRes.statusCode || 0;
+
+                if ([301, 302, 303, 307, 308].includes(status) && upstreamRes.headers.location && redirectCount < 3) {
+                    upstreamRes.resume();
+                    const nextUrl = new URL(upstreamRes.headers.location, parsed).toString();
+                    requestRemoteTicketMedia(nextUrl, method, rangeHeader, redirectCount + 1).then(resolve);
+                    return;
+                }
+
+                if (status !== 200 && status !== 206) {
+                    upstreamRes.resume();
+                    return resolve(null);
+                }
+
+                resolve(upstreamRes);
+            }
+        );
+
+        upstreamReq.on('timeout', () => {
+            upstreamReq.destroy();
+            resolve(null);
+        });
+
+        upstreamReq.on('error', () => {
+            resolve(null);
+        });
+
+        upstreamReq.end();
+    });
+};
+
+const saveStreamToFile = (upstreamRes: http.IncomingMessage, finalPath: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+        const dir = path.dirname(finalPath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+
+        const tmpPath = path.join(dir, `.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}-${path.basename(finalPath)}`);
+        const out = fs.createWriteStream(tmpPath);
+        let settled = false;
+
+        const cleanupTmp = () => {
+            try {
+                if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+            } catch {
+                // ignore temp cleanup failure
+            }
+        };
+
+        const finish = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            if (!ok) {
+                cleanupTmp();
+            }
+            resolve(ok);
+        };
+
+        out.on('error', () => {
+            upstreamRes.destroy();
+            finish(false);
+        });
+
+        upstreamRes.on('error', () => {
+            out.destroy();
+            finish(false);
+        });
+
+        out.on('finish', () => {
+            try {
+                const expectedLenRaw = upstreamRes.headers['content-length'];
+                const expectedLen = expectedLenRaw ? Number(expectedLenRaw) : NaN;
+                const actualLen = fs.statSync(tmpPath).size;
+                if (!Number.isNaN(expectedLen) && actualLen !== expectedLen) {
+                    return finish(false);
+                }
+                if (fs.existsSync(finalPath)) {
+                    cleanupTmp();
+                    return finish(true);
+                }
+                fs.renameSync(tmpPath, finalPath);
+                return finish(true);
+            } catch {
+                return finish(false);
+            }
+        });
+
+        upstreamRes.pipe(out);
+    });
+};
+
+const downloadAndSaveTicketFile = (safeFile: string, ext: string): Promise<string | null> => {
+    const existing = inFlightTicketDownloads.get(safeFile);
+    if (existing) return existing;
+
+    const task = (async () => {
+        const targetPath = path.join(uploadsDirPath, 'Tickets', safeFile);
+        if (fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
+            return targetPath;
+        }
+
+        const isHtmlExt = ext === '.html' || ext === '.htm';
+        for (const baseUrl of getRemoteTicketingUploadBases()) {
+            const remoteUrl = `${baseUrl}/uploads/Tickets/${encodeURIComponent(safeFile)}`;
+            const upstreamRes = await requestRemoteTicketMedia(remoteUrl, 'GET', undefined);
+            if (!upstreamRes) continue;
+
+            const upstreamContentType = String(upstreamRes.headers['content-type'] || '').toLowerCase();
+            if (upstreamRes.statusCode !== 200 || (!isHtmlExt && upstreamContentType.includes('text/html'))) {
+                upstreamRes.resume();
+                continue;
+            }
+
+            const saved = await saveStreamToFile(upstreamRes, targetPath);
+            if (saved && fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
+                return targetPath;
+            }
+        }
+
+        return null;
+    })().finally(() => {
+        inFlightTicketDownloads.delete(safeFile);
+    });
+
+    inFlightTicketDownloads.set(safeFile, task);
+    return task;
+};
+
+const serveTicketUploadFallback: express.RequestHandler = async (req, res, next) => {
+    try {
+        const rawFile = req.params.filename || '';
+        const safeFile = path.basename(rawFile);
+        if (!safeFile || safeFile === '.' || safeFile === '..') return next();
+
+        const candidateDirs = [
+            path.join(uploadsDirPath, 'Tickets'),
+            path.join(uploadsDirPath, 'tickets'),
+            path.join(externalTicketingUploadsPath, 'Tickets'),
+            path.join(externalTicketingUploadsPath, 'tickets'),
+        ];
+
+        const ext = path.extname(safeFile).toLowerCase();
 
         for (const dir of candidateDirs) {
-            if (!fs.existsSync(dir)) continue;
-            const files = fs.readdirSync(dir);
-            let match = files.find((f) => path.extname(f).toLowerCase() === ext);
-            if (!match && isAudioExt) {
-                match = files.find((f) => /^\.(mp3|wav|ogg|oga|m4a|aac|weba|flac)$/i.test(path.extname(f)));
-            } else if (!match && isVideoExt) {
-                match = files.find((f) => /^\.(mp4|webm|mov)$/i.test(path.extname(f)));
-            } else if (!match && isImageExt) {
-                match = files.find((f) => /^\.(jpeg|jpg|png|gif|webp)$/i.test(path.extname(f)));
-            }
-            if (match) {
-                return sendTicketMediaFile(res, path.join(dir, match), ext);
+            const exactPath = path.join(dir, safeFile);
+            if (fs.existsSync(exactPath) && fs.statSync(exactPath).isFile()) {
+                return sendTicketMediaFile(res, exactPath, ext);
             }
         }
-    }
 
-    return next();
+        const reqMethod: 'GET' | 'HEAD' = req.method === 'HEAD' ? 'HEAD' : 'GET';
+        const rangeHeader = typeof req.headers.range === 'string' && req.headers.range.trim() !== ''
+            ? req.headers.range
+            : undefined;
+
+        if (reqMethod === 'GET' && !rangeHeader) {
+            const savedPath = await downloadAndSaveTicketFile(safeFile, ext);
+            if (savedPath) {
+                if (req.destroyed || res.writableEnded) return;
+                return sendTicketMediaFile(res, savedPath, ext);
+            }
+            return next();
+        }
+
+        const isHtmlExt = ext === '.html' || ext === '.htm';
+        for (const baseUrl of getRemoteTicketingUploadBases()) {
+            if (req.destroyed || res.writableEnded) return;
+
+            const remoteUrl = `${baseUrl}/uploads/Tickets/${encodeURIComponent(safeFile)}`;
+            const upstreamRes = await requestRemoteTicketMedia(remoteUrl, reqMethod, rangeHeader);
+            if (!upstreamRes) continue;
+
+            const upstreamContentType = String(upstreamRes.headers['content-type'] || '').toLowerCase();
+            if (!isHtmlExt && upstreamContentType.includes('text/html')) {
+                upstreamRes.resume();
+                continue;
+            }
+
+            if (req.destroyed || res.writableEnded) {
+                upstreamRes.resume();
+                return;
+            }
+
+            if (reqMethod === 'GET') {
+                downloadAndSaveTicketFile(safeFile, ext).catch(() => {});
+            }
+
+            const resolvedMime =
+                MIME_BY_EXT[ext] && (!upstreamContentType || upstreamContentType.startsWith('application/octet-stream'))
+                    ? MIME_BY_EXT[ext]
+                    : (upstreamRes.headers['content-type'] || MIME_BY_EXT[ext]);
+
+            res.status(upstreamRes.statusCode || 200);
+            if (resolvedMime) {
+                res.setHeader('Content-Type', resolvedMime);
+            }
+            res.setHeader('Accept-Ranges', upstreamRes.headers['accept-ranges'] || 'bytes');
+            res.setHeader('Content-Disposition', 'inline');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+            for (const headerName of ['content-length', 'content-range', 'last-modified', 'etag', 'cache-control'] as const) {
+                const val = upstreamRes.headers[headerName];
+                if (val !== undefined) {
+                    res.setHeader(headerName, val);
+                }
+            }
+
+            if (reqMethod === 'HEAD') {
+                upstreamRes.resume();
+                return res.end();
+            }
+
+            const onClientClose = () => {
+                if (!res.writableEnded) {
+                    upstreamRes.destroy();
+                }
+            };
+            req.once('close', onClientClose);
+            res.once('finish', () => req.removeListener('close', onClientClose));
+            upstreamRes.on('error', () => {
+                if (!res.headersSent) {
+                    return next();
+                }
+                res.end();
+            });
+
+            return upstreamRes.pipe(res);
+        }
+
+        return next();
+    } catch {
+        if (!res.headersSent) {
+            return next();
+        }
+    }
 };
 
 app.get(['/uploads/Tickets/:filename', '/uploads/tickets/:filename', '/api/uploads/Tickets/:filename', '/api/uploads/tickets/:filename'], serveTicketUploadFallback);

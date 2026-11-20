@@ -313,7 +313,7 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.get('/', authenticate, authorize([1, 2]), getAllUsers);
+router.get('/', authenticate, authorize([]), getAllUsers);
 
 /**
  * @swagger
@@ -395,7 +395,7 @@ router.get('/dropdown', authenticate, getUserDropdown);
  *       500:
  *         description: Internal server error
  */
-router.get('/:id', authenticate, authorize([1, 2]), getUserById);
+router.get('/:id', authenticate, authorize([]), getUserById);
 
 /**
  * @swagger
@@ -439,7 +439,7 @@ router.get('/:id', authenticate, authorize([1, 2]), getUserById);
  *       500:
  *         description: Internal server error
  */
-router.post('/', authenticate, authorize([1, 2]), createUser);
+router.post('/', authenticate, authorize([]), createUser);
 
 /**
  * @swagger
@@ -487,7 +487,7 @@ router.post('/', authenticate, authorize([1, 2]), createUser);
  *       500:
  *         description: Internal server error
  */
-router.put('/:id', authenticate, authorize([1, 2]), updateUser);
+router.put('/:id', authenticate, authorize([]), updateUser);
 
 /**
  * @swagger
@@ -567,7 +567,7 @@ router.put('/:id/change-password', authenticate, changePassword);
  *       500:
  *         description: Internal server error
  */
-router.delete('/:id', authenticate, authorize([1]), deleteUser);
+router.delete('/:id', authenticate, authorize([]), deleteUser);
 
 /**
  * @swagger
@@ -605,7 +605,7 @@ router.delete('/:id', authenticate, authorize([1]), deleteUser);
  *       500:
  *         description: Internal server error
  */
-router.delete('/:id/hard', authenticate, authorize([1]), hardDeleteUser);
+router.delete('/:id/hard', authenticate, authorize([]), hardDeleteUser);
 
 /**
  * @swagger
@@ -645,6 +645,6 @@ router.delete('/:id/hard', authenticate, authorize([1]), hardDeleteUser);
  *       500:
  *         description: Internal server error
  */
-router.put('/:id/restore', authenticate, authorize([1, 2]), restoreUser);
+router.put('/:id/restore', authenticate, authorize([]), restoreUser);
 
 export default router;

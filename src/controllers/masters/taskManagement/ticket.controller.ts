@@ -320,7 +320,6 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
     try {
         const pool = await getTicketDbPool(req);
         await ensureTicketColumnsExist(pool);
-        await syncPoolTicketSchedules(pool);
 
         const body = req.body || {};
         const queryParams = req.query || {};
@@ -344,18 +343,18 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
             companyId = 2n;
         }
 
-        // User_Id identifies the company-local employee allocated to tickets.
-        const requestedUserId =
+        // Allocations and Created_By store portal global IDs. A logged-in
+        // caller's local ID (often sent by the frontend) must not override it.
+        const requestedUserId = req.authenticateId ? req.userId : (
             queryParams.userId ??
             queryParams.User_Id ??
-            req.params?.User_Id ??
             body.userId ??
             body.User_Id ??
             req.localUserId ??
             req.userId ??
             req.user?.UserId ??
             req.user?.Local_User_ID ??
-            req.user?.Global_User_ID;
+            req.user?.Global_User_ID);
         const userId = toBigIntValue(requestedUserId);
         const hasRequestedUserId =
             requestedUserId !== undefined &&
@@ -383,43 +382,27 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
             body.UserType;
 
         let resolvedUserTypeId: number | null = null;
-        let localUserIdFromDb: bigint | null = toBigIntValue(req.localUserId ?? req.user?.Local_User_ID ?? req.user?.UserId);
-        let globalUserIdFromDb: bigint | null = toBigIntValue(req.userId ?? req.user?.Global_User_ID);
-
-        if (userId) {
-            // Auto-detect UserTypeId and UserId / Global_User_ID mapping from tbl_Users in company database
+        if (req.userTypeId !== undefined && req.userTypeId !== null && String(req.userTypeId).trim() !== '') {
+            resolvedUserTypeId = Number(req.userTypeId);
+        } else if (req.user?.UserTypeId !== undefined && req.user?.UserTypeId !== null) {
+            resolvedUserTypeId = Number(req.user.UserTypeId);
+        } else if (rawUserTypeId !== undefined && rawUserTypeId !== null && String(rawUserTypeId).trim() !== '') {
+            resolvedUserTypeId = Number(rawUserTypeId);
+        } else if (userId) {
+            // Auto-detect UserTypeId from tbl_Users in company database
             try {
                 const uReq = new sql.Request(pool);
                 uReq.input('LookupUserId', sql.BigInt, userId);
                 const uRes = await uReq.query(`
-                    SELECT TOP (1) UserId, Global_User_ID, UserTypeId
+                    SELECT TOP (1) UserTypeId
                     FROM [dbo].[tbl_Users]
                     WHERE UserId = @LookupUserId OR Global_User_ID = @LookupUserId
                 `);
-                if (uRes.recordset.length > 0) {
-                    const uRow = uRes.recordset[0];
-                    if (uRow.UserTypeId !== null && uRow.UserTypeId !== undefined) {
-                        resolvedUserTypeId = Number(uRow.UserTypeId);
-                    }
-                    if (uRow.UserId !== null && uRow.UserId !== undefined) {
-                        localUserIdFromDb = toBigIntValue(uRow.UserId);
-                    }
-                    if (uRow.Global_User_ID !== null && uRow.Global_User_ID !== undefined) {
-                        globalUserIdFromDb = toBigIntValue(uRow.Global_User_ID);
-                    }
+                if (uRes.recordset.length > 0 && uRes.recordset[0].UserTypeId !== null) {
+                    resolvedUserTypeId = Number(uRes.recordset[0].UserTypeId);
                 }
             } catch (uErr: any) {
                 console.warn('⚠️ Could not lookup UserTypeId from tbl_Users:', uErr.message);
-            }
-        }
-
-        if (resolvedUserTypeId === null) {
-            if (req.userTypeId !== undefined && req.userTypeId !== null && String(req.userTypeId).trim() !== '') {
-                resolvedUserTypeId = Number(req.userTypeId);
-            } else if (req.user?.UserTypeId !== undefined && req.user?.UserTypeId !== null) {
-                resolvedUserTypeId = Number(req.user.UserTypeId);
-            } else if (rawUserTypeId !== undefined && rawUserTypeId !== null && String(rawUserTypeId).trim() !== '') {
-                resolvedUserTypeId = Number(rawUserTypeId);
             }
         }
 
@@ -440,8 +423,7 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
         const request = new sql.Request(pool);
         request.input('Offset', sql.Int, offset);
         request.input('PageSize', sql.Int, pageSize);
-        request.input('Alt_Local_User_Id', sql.BigInt, localUserIdFromDb ?? userId ?? 0n);
-        request.input('Alt_Global_User_Id', sql.BigInt, globalUserIdFromDb ?? userId ?? 0n);
+        request.input('Viewer_User_Id', sql.BigInt, userId || null);
 
         const whereConditions: string[] = [];
         if (companyId) {
@@ -453,7 +435,7 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
         if (referencesOnly && !isAdmin) {
             if (!userId) return invalidInput(res, 'User_Id is required to list reference tickets');
             request.input('Reference_Creator_Id', sql.BigInt, userId);
-            whereConditions.push('(t.Created_By = @Reference_Creator_Id OR t.Created_By = @Alt_Local_User_Id OR t.Created_By = @Alt_Global_User_Id)');
+            whereConditions.push('t.Created_By = @Reference_Creator_Id');
         } else if (assignedOnly) {
             // Explicitly requested assigned tickets only
             if (userId) {
@@ -465,7 +447,7 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
                         INNER JOIN ${ALLOCATION_EMP_TABLE} ae_chk
                             ON ae_chk.T_Sch_Id = a_chk.T_Sch_Id
                         WHERE a_chk.Ticket_Id = t.Id
-                          AND ae_chk.Employee_Involved_Id IN (@User_Id, @Alt_Local_User_Id, @Alt_Global_User_Id)
+                          AND ae_chk.Employee_Involved_Id = @User_Id
                           AND LTRIM(RTRIM(ISNULL(ae_chk.Is_Active, ''))) = '1'
                     )
                 `);
@@ -478,14 +460,14 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
                 request.input('User_Id', sql.BigInt, userId);
                 whereConditions.push(`
                     (
-                        t.Created_By IN (@User_Id, @Alt_Local_User_Id, @Alt_Global_User_Id)
+                        t.Created_By = @User_Id
                         OR EXISTS (
                             SELECT 1
                             FROM ${ALLOCATION_TABLE} a_chk
                             INNER JOIN ${ALLOCATION_EMP_TABLE} ae_chk
                                 ON ae_chk.T_Sch_Id = a_chk.T_Sch_Id
                             WHERE a_chk.Ticket_Id = t.Id
-                              AND ae_chk.Employee_Involved_Id IN (@User_Id, @Alt_Local_User_Id, @Alt_Global_User_Id)
+                              AND ae_chk.Employee_Involved_Id = @User_Id
                               AND LTRIM(RTRIM(ISNULL(ae_chk.Is_Active, ''))) = '1'
                         )
                     )
@@ -558,7 +540,7 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
             OUTER APPLY (
                 SELECT TOP (1) creator.Name
                 FROM [dbo].[tbl_Users] creator
-                WHERE creator.Global_User_Id = t.Created_By OR creator.UserId = t.Created_By
+                WHERE creator.Global_User_Id = t.Created_By
                 ORDER BY creator.UserId DESC
             ) u
             OUTER APPLY (
@@ -580,6 +562,7 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
                 WHERE employee.T_Sch_Id = a.T_Sch_Id
                 ORDER BY
                     CASE WHEN LTRIM(RTRIM(ISNULL(employee.Is_Active, ''))) = '1' THEN 0 ELSE 1 END,
+                    CASE WHEN employee.Employee_Involved_Id = @Viewer_User_Id THEN 0 ELSE 1 END,
                     employee.Assigned_At DESC, employee.Employee_Involved_Id DESC
             ) ae
             OUTER APPLY (
@@ -604,7 +587,7 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
         if (ticketIds.length > 0) {
             try {
                 const refReq = new sql.Request(pool);
-                const idParams = ticketIds.map((id, idx) => {
+                const idParams = ticketIds.map((id: any, idx: number) => {
                     refReq.input(`tId_${idx}`, sql.BigInt, id);
                     return `@tId_${idx}`;
                 });
@@ -651,30 +634,10 @@ export const getTicketsListHandler = async (req: any, res: Response) => {
                 row.Reference_Ticket_Id = ticketRefs.length > 0 ? ticketRefs[0].Ref_Ticket_Id : null;
                 row.Ref_Ticket_Id = ticketRefs.length > 0 ? ticketRefs[0].Ref_Ticket_Id : null;
 
-                // Ensure frontend compatibility fields (Priority, Category_Name, From_Company_Name, Company IDs, Image_Url)
+                // Ensure frontend compatibility fields for NotificationScreen display without altering DB company IDs
                 row.Priority = row.Priority ?? row.ReqPriority ?? row.Admin_Priority ?? 'Low';
                 row.Category_Name = row.Category_Name ?? row.Category ?? null;
                 row.From_Company_Name = row.From_Company_Name ?? row.Organisation ?? null;
-                if (row.From_CompanyId === null || row.From_CompanyId === undefined || row.From_CompanyId === '') {
-                    row.From_CompanyId = row.createdcompany ?? Number(companyId);
-                }
-                if (row.To_CompanyId === null || row.To_CompanyId === undefined || row.To_CompanyId === '') {
-                    row.To_CompanyId = Number(companyId);
-                } else if (String(row.To_CompanyId) !== String(companyId)) {
-                    if (String(row.From_CompanyId) === String(companyId)) {
-                        row.From_CompanyId = Number(row.To_CompanyId);
-                    }
-                    row.To_CompanyId = Number(companyId);
-                }
-                if (!isAdmin && userId && row.Employee_Involved_Id !== null && row.Employee_Involved_Id !== undefined) {
-                    const empIdStr = String(row.Employee_Involved_Id);
-                    if (
-                        (localUserIdFromDb && empIdStr === String(localUserIdFromDb)) ||
-                        (globalUserIdFromDb && empIdStr === String(globalUserIdFromDb))
-                    ) {
-                        row.Employee_Involved_Id = Number(userId);
-                    }
-                }
                 if (typeof row.Image_Url === 'string' && row.Image_Url.trim() !== '') {
                     const img = row.Image_Url.trim().replace(/\\/g, '/');
                     if (img.startsWith('uploads/')) {

@@ -19,6 +19,14 @@ const formatDateToString = (date: Date): string => {
 const isValidDate = (dateStr: string): boolean =>
     !isNaN(new Date(dateStr).getTime());
 
+const cleanMobileNumber = (mobileNo: string | null | undefined): string | null => {
+    if (!mobileNo || mobileNo.trim() === '') return null;
+    const cleaned = mobileNo.replace(/\D/g, '').replace(/^0+/, '');
+    if (/^[6789]\d{9}$/.test(cleaned)) return cleaned;
+    if (/^91[6789]\d{9}$/.test(cleaned)) return cleaned.substring(2);
+    return null;
+};
+
 const getEmployeeForUser = async (
     db: import('sequelize').Sequelize,
     req: Request
@@ -26,18 +34,84 @@ const getEmployeeForUser = async (
     const user = (req as any).user;
     if (!user) return null;
 
-    const localUserId = (req as any).localUserId ?? user.Local_User_ID ?? null;
-    const globalUserId = (req as any).userId ?? user.Global_User_ID ?? null;
-    const userName = user.UserName ?? null;
+    const reqLocalUserId =
+        (req as any).localUserId != null
+            ? Number((req as any).localUserId)
+            : (req as any).tokenSession?.localUserId != null
+            ? Number((req as any).tokenSession.localUserId)
+            : null;
+    const portalLocalUserId = user.Local_User_ID != null ? Number(user.Local_User_ID) : null;
+    const globalUserId =
+        (req as any).userId != null
+            ? Number((req as any).userId)
+            : user.Global_User_ID != null
+            ? Number(user.Global_User_ID)
+            : user.UserId != null
+            ? Number(user.UserId)
+            : null;
+    const userName = user.UserName ? String(user.UserName).trim() : null;
+    const cleanedMobile = cleanMobileNumber(userName);
+    const empName = user.Name ? String(user.Name).trim() : null;
+
+    let companyUserId: number | null = null;
+    if (globalUserId !== null || (userName !== null && userName !== '')) {
+        try {
+            const userRows = await db.query<{ UserId: number }>(
+                `SELECT TOP 1 UserId
+                 FROM tbl_Users
+                 WHERE ISNULL(UDel_Flag, 0) = 0
+                   AND (
+                       (:globalUserId IS NOT NULL AND Global_User_ID = :globalUserId)
+                       OR (:userName IS NOT NULL AND LOWER(LTRIM(RTRIM(UserName))) = LOWER(LTRIM(RTRIM(:userName))))
+                   )
+                 ORDER BY CASE WHEN :globalUserId IS NOT NULL AND Global_User_ID = :globalUserId THEN 0 ELSE 1 END, UserId ASC`,
+                {
+                    replacements: { globalUserId, userName },
+                    type: QueryTypes.SELECT,
+                }
+            );
+            if (userRows && userRows.length > 0 && userRows[0].UserId != null) {
+                companyUserId = Number(userRows[0].UserId);
+            }
+        } catch {}
+    }
 
     const rows = await db.query<{ Emp_Id: number; User_Mgt_Id: number; fingerPrintEmpId: string }>(
-        `SELECT TOP 1 Emp_Id, User_Mgt_Id, fingerPrintEmpId 
-         FROM tbl_Employee_Master 
-         WHERE (:localUserId IS NOT NULL AND User_Mgt_Id = :localUserId)
-            OR (:globalUserId IS NOT NULL AND User_Mgt_Id = :globalUserId)
-            OR (:userName IS NOT NULL AND Mobile_No = :userName)`,
+        `SELECT TOP 1 Emp_Id, User_Mgt_Id, LTRIM(RTRIM(fingerPrintEmpId)) AS fingerPrintEmpId
+         FROM tbl_Employee_Master
+         WHERE (Del_Flag = 0 OR Del_Flag IS NULL)
+           AND (
+               (:portalLocalUserId IS NOT NULL AND User_Mgt_Id = :portalLocalUserId)
+               OR (:userName IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :userName)
+               OR (:cleanedMobile IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :cleanedMobile)
+               OR (:empName IS NOT NULL AND LOWER(LTRIM(RTRIM(Emp_Name))) = LOWER(LTRIM(RTRIM(:empName))))
+               OR (:companyUserId IS NOT NULL AND User_Mgt_Id = :companyUserId)
+               OR (:reqLocalUserId IS NOT NULL AND User_Mgt_Id = :reqLocalUserId)
+               OR (:globalUserId IS NOT NULL AND User_Mgt_Id = :globalUserId)
+           )
+         ORDER BY
+           CASE
+               WHEN (:portalLocalUserId IS NOT NULL AND User_Mgt_Id = :portalLocalUserId) THEN 0
+               WHEN (:userName IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :userName)
+                    OR (:cleanedMobile IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :cleanedMobile) THEN 1
+               WHEN (:empName IS NOT NULL AND LOWER(LTRIM(RTRIM(Emp_Name))) = LOWER(LTRIM(RTRIM(:empName)))) THEN 2
+               WHEN (:companyUserId IS NOT NULL AND User_Mgt_Id = :companyUserId) THEN 3
+               WHEN (:reqLocalUserId IS NOT NULL AND User_Mgt_Id = :reqLocalUserId) THEN 4
+               WHEN (:globalUserId IS NOT NULL AND User_Mgt_Id = :globalUserId) THEN 5
+               ELSE 6
+           END ASC,
+           CASE WHEN ISNULL(LTRIM(RTRIM(fingerPrintEmpId)), '') NOT IN ('', '0') THEN 0 ELSE 1 END ASC,
+           Emp_Id DESC`,
         {
-            replacements: { localUserId, globalUserId, userName },
+            replacements: {
+                companyUserId,
+                reqLocalUserId,
+                portalLocalUserId,
+                userName,
+                cleanedMobile,
+                empName,
+                globalUserId,
+            },
             type: QueryTypes.SELECT,
         }
     );
@@ -580,11 +654,11 @@ const getMultipleEmployeesAttendance = async (
     let punchFilterCondition = '';
 
     if (FingerPrintId && FingerPrintId !== 'ALL' && FingerPrintId !== '0') {
-        filterCondition = "AND em.fingerPrintEmpId = :FingerPrintId";
-        punchFilterCondition = "AND pd.EmployeeCode = :FingerPrintId";
+        filterCondition = "AND LTRIM(RTRIM(em.fingerPrintEmpId)) = LTRIM(RTRIM(:FingerPrintId))";
+        punchFilterCondition = "AND LTRIM(RTRIM(CAST(pd.EmployeeCode AS NVARCHAR(50)))) = LTRIM(RTRIM(:FingerPrintId))";
     } else if (UserMgtId) {
         filterCondition = "AND em.User_Mgt_Id = :UserMgtId";
-        punchFilterCondition = "AND pd.EmployeeCode IN (SELECT fingerPrintEmpId COLLATE DATABASE_DEFAULT FROM tbl_Employee_Master WHERE User_Mgt_Id = :UserMgtId)";
+        punchFilterCondition = "AND LTRIM(RTRIM(CAST(pd.EmployeeCode AS NVARCHAR(50)))) IN (SELECT LTRIM(RTRIM(fingerPrintEmpId)) COLLATE DATABASE_DEFAULT FROM tbl_Employee_Master WHERE User_Mgt_Id = :UserMgtId)";
     }
 
     const query = `
@@ -679,13 +753,14 @@ const getMultipleEmployeesAttendance = async (
             END AS AttendanceStatus
         FROM tbl_Employee_Master em
         LEFT JOIN tbl_Employee_Designation d  ON em.Designation      = d.Designation_Id
-        LEFT JOIN RankedLogs               rl ON em.fingerPrintEmpId  = rl.fingerPrintEmpId AND em.User_Mgt_Id = rl.User_Mgt_Id
+        LEFT JOIN RankedLogs               rl ON em.fingerPrintEmpId  = rl.fingerPrintEmpId AND ISNULL(em.User_Mgt_Id, -1) = ISNULL(rl.User_Mgt_Id, -1)
         LEFT JOIN PunchDetails             ag ON ag.EmployeeCode      = rl.EmployeeCode
                                              AND ag.LogDate            = rl.LogDate
         WHERE
             rl.LogDate IS NOT NULL
             AND rl.LogDate >= CAST(:FromDate AS DATETIME)
             AND rl.LogDate <  CAST(:ToDate   AS DATETIME)
+            ${filterCondition}
         GROUP BY
             em.fingerPrintEmpId, d.Designation, rl.username, rl.Sex,
             rl.LogDate, ag.PunchDateTimes, rl.User_Mgt_Id

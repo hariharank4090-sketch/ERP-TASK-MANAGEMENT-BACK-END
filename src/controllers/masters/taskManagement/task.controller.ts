@@ -9,6 +9,11 @@ import {
     notFound,
     sentData
 } from '../../../responseObject';
+import {
+    DEFAULT_SCHEDULE_PLANS,
+    ensureSchPlanTableSeeded,
+    resolvePlanTypeName
+} from './projectScedule.controller';
 import { 
     initTaskModel,
     initProjectScheduleModel,
@@ -118,7 +123,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     }
     
     // Add your permission logic here based on UserTypeId
-    if (requiredPermission === 'create_tasks' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
+    if (requiredPermission === 'create_tasks' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
     if (requiredPermission === 'update_tasks' && ![1, 2].includes(user.UserTypeId)) {
@@ -127,7 +132,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     if (requiredPermission === 'delete_tasks' && user.UserTypeId !== 1) {
         return false;
     }
-    if (requiredPermission === 'view_tasks' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
+    if (requiredPermission === 'view_tasks' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
     
@@ -638,6 +643,11 @@ export const getTaskSchedules = async (req: Request, res: Response) => {
             return handleForbiddenError(res, 'You do not have permission to view schedules for this task');
         }
 
+        const db = (req as any).companyDB;
+        if (db) {
+            await ensureSchPlanTableSeeded(db);
+        }
+
         // Get all schedules without pagination
         const schedules = await ProjectSchedule.findAll({
             where: { 
@@ -647,11 +657,25 @@ export const getTaskSchedules = async (req: Request, res: Response) => {
             order: [['Sch_Date', 'DESC']]
         });
 
+        const enrichedSchedules = schedules.map((sch: any) => {
+            const plain = sch?.get ? sch.get({ plain: true }) : sch;
+            const resolvedPlan = resolvePlanTypeName(
+                plain?.Plan_Type ?? plain?.planType,
+                plain?.Sch_Plan_Id ?? plain?.schPlanId,
+                plain?.Sch_Type ?? plain?.schType
+            );
+            return {
+                ...plain,
+                Plan_Type: resolvedPlan,
+                planType: resolvedPlan
+            };
+        });
+
         return res.status(200).json({
             success: true,
             message: 'Task schedules retrieved successfully',
-            data: schedules,
-            total: schedules.length
+            data: enrichedSchedules,
+            total: enrichedSchedules.length
         });
 
     } catch (error: any) {

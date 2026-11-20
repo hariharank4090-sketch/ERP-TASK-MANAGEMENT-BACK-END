@@ -95,7 +95,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     }
     
     // Add your permission logic here based on UserTypeId
-    if (requiredPermission === 'create_tasktypes' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
+    if (requiredPermission === 'create_tasktypes' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
     if (requiredPermission === 'update_tasktypes' && ![1, 2].includes(user.UserTypeId)) {
@@ -104,7 +104,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     if (requiredPermission === 'delete_tasktypes' && user.UserTypeId !== 1) {
         return false;
     }
-    if (requiredPermission === 'view_tasktypes' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
+    if (requiredPermission === 'view_tasktypes' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
     

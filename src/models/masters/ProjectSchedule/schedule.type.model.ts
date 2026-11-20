@@ -31,7 +31,8 @@ export const ScheduleCreateSchema = z.object({
     }).optional().default({}),
 
     selectedDays: z.array(z.number().int()).optional().default([]),
-    specificDates: z.array(z.string()).optional().default([])
+    specificDates: z.array(z.string()).optional().default([]),
+    Ticket_Id: z.union([z.number().int(), z.string(), z.null()]).optional().transform(val => (val !== undefined && val !== null && val !== '') ? Number(val) : null)
 }).superRefine((data, ctx) => {
     // Basic date range validation: end must not be before start
     if (data.Sch_Start_Date && data.Sch_End_Date) {
@@ -132,7 +133,8 @@ export const ScheduleUpdateSchema = z.object({
     }).optional(),
     selectedDays: z.array(z.number().int()).optional(),
     specificDates: z.array(z.string()).optional(),
-    isExtension: z.boolean().optional()
+    isExtension: z.boolean().optional(),
+    Ticket_Id: z.union([z.number().int(), z.string(), z.null()]).optional().transform(val => (val !== undefined && val !== null && val !== '') ? Number(val) : null)
 }).superRefine((data, ctx) => {
     // Basic date range validation: end must not be before start
     if (data.Sch_Start_Date && data.Sch_End_Date) {

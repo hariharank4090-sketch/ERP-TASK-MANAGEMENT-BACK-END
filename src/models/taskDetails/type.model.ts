@@ -31,6 +31,10 @@ export interface TaskDetailWithSchedule extends TaskDetailAttributes {
   Schedule_Sch_End_Date?: Date | null;
   Schedule_Task_Sch_Duaration?: number | null;
   Schedule_Sch_Status?: number | null;
+  Schedule_Sch_Comp_Date?: Date | null;
+  Schedule_Update_Date?: Date | null;
+  Schedule_Ticket_Id?: number | null;
+  Ticket_Id?: number | null;
   // Added Task Name from tbl_Task
   Task_Name?: string | null;
   Task_Desc?: string | null;

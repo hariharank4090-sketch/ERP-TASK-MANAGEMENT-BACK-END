@@ -103,7 +103,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     if (requiredPermission === 'delete_task_parameters' && ![1, 2].includes(user.UserTypeId)) {
         return false;
     }
-    if (requiredPermission === 'view_task_parameters' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) {
+    if (requiredPermission === 'view_task_parameters' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
     

@@ -68,10 +68,10 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     if (!user) return false;
     if (user.UserTypeId === 0) return true;
     
-    if (requiredPermission === 'create' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) return false;
+    if (requiredPermission === 'create' && !(Number(user.UserTypeId) >= 1)) return false;
     if (requiredPermission === 'update' && ![1, 2].includes(user.UserTypeId)) return false;
     if (requiredPermission === 'delete' && user.UserTypeId !== 1) return false;
-    if (requiredPermission === 'view' && ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(user.UserTypeId)) return false;
+    if (requiredPermission === 'view' && !(Number(user.UserTypeId) >= 1)) return false;
     
     return true;
 };

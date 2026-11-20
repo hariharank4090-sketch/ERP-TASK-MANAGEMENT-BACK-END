@@ -1,0 +1,60 @@
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '996702509823996');
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id=996702509823996&ev=PageView&noscript=1"
+/></noscript>
+<!-- End Meta Pixel Code -->
+
+
+View Content :
+fbq('track', 'ViewContent', {
+    content_ids: ['PRODUCT_ID'],
+    content_name: 'PRODUCT_NAME',
+    content_type: 'product',
+    value: PRODUCT_PRICE,
+    currency: 'INR'
+});
+
+
+AddToCart
+fbq('track', 'AddToCart', {
+    content_ids: ['PRODUCT_ID'],
+    content_name: 'PRODUCT_NAME',
+    content_type: 'product',
+    value: PRODUCT_PRICE,
+    currency: 'INR'
+});
+
+
+InitiateCheckout
+fbq('track', 'InitiateCheckout', {
+    value: CART_TOTAL,
+    currency: 'INR',
+    num_items: TOTAL_ITEMS
+});
+
+
+Purchase
+fbq('track', 'Purchase', {
+    value: ORDER_TOTAL,
+    currency: 'INR',
+    contents: [
+        {
+            id: 'PRODUCT_ID',
+            quantity: QUANTITY
+        }
+    ],
+    content_type: 'product'
+});
+

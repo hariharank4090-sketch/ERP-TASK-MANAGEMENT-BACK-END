@@ -1,7 +1,7 @@
 // src/controllers/masters/taskManagement/employeemaster.controller.ts
 
 import { Request, Response } from 'express';
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { ZodError } from 'zod';
 import {
     created,
@@ -172,8 +172,8 @@ const getUserPermissionsForCurrentCompany = (req: Request): {
     }
 
     const userTypeId = user.UserTypeId;
-    const localUserId = tokenSession?.localUserId || user.Local_User_ID || null;
-    const globalUserId = user.Global_User_ID || null;
+    const localUserId = (req as any).localUserId ?? tokenSession?.localUserId ?? user.Local_User_ID ?? null;
+    const globalUserId = (req as any).userId ?? user.Global_User_ID ?? null;
 
     // Super Admin (0) and Admin (1) have full access
     if (userTypeId === 0 || userTypeId === 1) {
@@ -215,7 +215,7 @@ const getUserPermissionsForCurrentCompany = (req: Request): {
     }
 
     // Regular employees (4-10) can only view
-    if (userTypeId >= 4 && userTypeId <= 10) {
+    if (userTypeId >= 4 && userTypeId <= 20) {
         return {
             canView: true,
             canCreate: false,
@@ -263,11 +263,13 @@ const isManagerOrHigherForCurrentCompany = (req: Request): boolean => {
  * Get the Local_User_ID for the current user in the current company
  */
 const getLocalUserIdForCurrentCompany = (req: Request): number | null => {
+    if ((req as any).localUserId != null) return Number((req as any).localUserId);
+
     const tokenSession = (req as any).tokenSession;
-    if (tokenSession?.localUserId != null) return tokenSession.localUserId;
+    if (tokenSession?.localUserId != null) return Number(tokenSession.localUserId);
     
     const user = (req as any).user;
-    if (user?.Local_User_ID != null) return user.Local_User_ID;
+    if (user?.Local_User_ID != null) return Number(user.Local_User_ID);
     
     return null;
 };
@@ -277,7 +279,90 @@ const getLocalUserIdForCurrentCompany = (req: Request): number | null => {
  */
 const getGlobalUserId = (req: Request): number | null => {
     const user = (req as any).user;
-    return user?.Global_User_ID || null;
+    return (req as any).userId ?? user?.Global_User_ID ?? null;
+};
+
+/**
+ * Resolve the logged-in non-admin user's employee record in the current company DB
+ */
+const resolveEmployeeForCurrentUser = async (
+    req: Request
+): Promise<{ Emp_Id: number; User_Mgt_Id: number | null } | null> => {
+    const db: import('sequelize').Sequelize | undefined = (req as any).companyDB;
+    const user = (req as any).user;
+    if (!db || !user) return null;
+
+    const reqLocalUserId = getLocalUserIdForCurrentCompany(req);
+    const portalLocalUserId = user?.Local_User_ID != null ? Number(user.Local_User_ID) : null;
+    const globalUserId = getGlobalUserId(req);
+    const userName = user?.UserName ? String(user.UserName).trim() : null;
+    const cleanedMobile = cleanMobileNumber(userName);
+    const empName = user?.Name ? String(user.Name).trim() : null;
+
+    let companyUserId: number | null = null;
+    if (globalUserId !== null || (userName !== null && userName !== '')) {
+        try {
+            const userRows = await db.query<{ UserId: number }>(
+                `SELECT TOP 1 UserId
+                 FROM tbl_Users
+                 WHERE ISNULL(UDel_Flag, 0) = 0
+                   AND (
+                       (:globalUserId IS NOT NULL AND Global_User_ID = :globalUserId)
+                       OR (:userName IS NOT NULL AND LOWER(LTRIM(RTRIM(UserName))) = LOWER(LTRIM(RTRIM(:userName))))
+                   )
+                 ORDER BY CASE WHEN :globalUserId IS NOT NULL AND Global_User_ID = :globalUserId THEN 0 ELSE 1 END, UserId ASC`,
+                {
+                    replacements: { globalUserId, userName },
+                    type: QueryTypes.SELECT,
+                }
+            );
+            if (userRows && userRows.length > 0 && userRows[0].UserId != null) {
+                companyUserId = Number(userRows[0].UserId);
+            }
+        } catch {}
+    }
+
+    const rows = await db.query<{ Emp_Id: number; User_Mgt_Id: number | null }>(
+        `SELECT TOP 1 Emp_Id, User_Mgt_Id
+         FROM tbl_Employee_Master
+         WHERE (Del_Flag = 0 OR Del_Flag IS NULL)
+           AND (
+               (:portalLocalUserId IS NOT NULL AND User_Mgt_Id = :portalLocalUserId)
+               OR (:userName IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :userName)
+               OR (:cleanedMobile IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :cleanedMobile)
+               OR (:empName IS NOT NULL AND LOWER(LTRIM(RTRIM(Emp_Name))) = LOWER(LTRIM(RTRIM(:empName))))
+               OR (:companyUserId IS NOT NULL AND User_Mgt_Id = :companyUserId)
+               OR (:reqLocalUserId IS NOT NULL AND User_Mgt_Id = :reqLocalUserId)
+               OR (:globalUserId IS NOT NULL AND User_Mgt_Id = :globalUserId)
+           )
+         ORDER BY
+           CASE
+               WHEN (:portalLocalUserId IS NOT NULL AND User_Mgt_Id = :portalLocalUserId) THEN 0
+               WHEN (:userName IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :userName)
+                    OR (:cleanedMobile IS NOT NULL AND LTRIM(RTRIM(Mobile_No)) = :cleanedMobile) THEN 1
+               WHEN (:empName IS NOT NULL AND LOWER(LTRIM(RTRIM(Emp_Name))) = LOWER(LTRIM(RTRIM(:empName)))) THEN 2
+               WHEN (:companyUserId IS NOT NULL AND User_Mgt_Id = :companyUserId) THEN 3
+               WHEN (:reqLocalUserId IS NOT NULL AND User_Mgt_Id = :reqLocalUserId) THEN 4
+               WHEN (:globalUserId IS NOT NULL AND User_Mgt_Id = :globalUserId) THEN 5
+               ELSE 6
+           END ASC,
+           CASE WHEN ISNULL(LTRIM(RTRIM(fingerPrintEmpId)), '') NOT IN ('', '0') THEN 0 ELSE 1 END ASC,
+           Emp_Id DESC`,
+        {
+            replacements: {
+                companyUserId,
+                reqLocalUserId,
+                portalLocalUserId,
+                userName,
+                cleanedMobile,
+                empName,
+                globalUserId,
+            },
+            type: QueryTypes.SELECT,
+        }
+    );
+
+    return rows && rows.length > 0 ? rows[0] : null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -325,26 +410,31 @@ export const getAllEmployees = async (req: Request, res: Response) => {
         // ── Build where clause with permission filtering ────────────────────
         const whereClause: any = { Del_Flag: { [Op.or]: [0, null] } };
 
-        // Non-admin users see only records linked to their User_Mgt_Id
+        // Non-admin users see only their own employee record
         if (!isAdminForCurrentCompany(req)) {
-            const localUserId = getLocalUserIdForCurrentCompany(req);
-            if (localUserId != null) {
-                whereClause.User_Mgt_Id = localUserId;
+            const empRecord = await resolveEmployeeForCurrentUser(req);
+            if (empRecord && empRecord.Emp_Id != null) {
+                whereClause.Emp_Id = empRecord.Emp_Id;
             } else {
-                console.warn('⚠️  localUserId not found in session — returning empty result set');
-                return res.status(200).json({
-                    success: true,
-                    message: 'Employees retrieved successfully',
-                    data: [],
-                    totalCount: 0,
-                    permissions: {
-                        canView: permissions.canView,
-                        canCreate: permissions.canCreate,
-                        canUpdate: permissions.canUpdate,
-                        canDelete: permissions.canDelete,
-                        userTypeId: permissions.userTypeId
-                    }
-                });
+                const localUserId = getLocalUserIdForCurrentCompany(req);
+                if (localUserId != null) {
+                    whereClause.User_Mgt_Id = localUserId;
+                } else {
+                    console.warn('⚠️  Employee mapping not found for current user — returning empty result set');
+                    return res.status(200).json({
+                        success: true,
+                        message: 'Employees retrieved successfully',
+                        data: [],
+                        totalCount: 0,
+                        permissions: {
+                            canView: permissions.canView,
+                            canCreate: permissions.canCreate,
+                            canUpdate: permissions.canUpdate,
+                            canDelete: permissions.canDelete,
+                            userTypeId: permissions.userTypeId
+                        }
+                    });
+                }
             }
         } else {
         }
@@ -368,7 +458,20 @@ export const getAllEmployees = async (req: Request, res: Response) => {
             order: [[sortField, sortDirection]],
         });
 
-        const formattedEmployees = employees.map((e: any) => formatEmployeeForResponse(e));
+        const isNonAdmin = !isAdminForCurrentCompany(req);
+        const globalUserId = getGlobalUserId(req);
+        const localUserId = getLocalUserIdForCurrentCompany(req);
+        const formattedEmployees = employees.map((e: any) => {
+            const formatted = formatEmployeeForResponse(e);
+            if (formatted && typeof formatted.fingerPrintEmpId === 'string') {
+                formatted.fingerPrintEmpId = formatted.fingerPrintEmpId.trim();
+            }
+            if (isNonAdmin && formatted) {
+                // Ensure frontend user matching (u.User_Mgt_Id == Global_User_ID || u.User_Mgt_Id == Local_User_ID) always succeeds
+                formatted.User_Mgt_Id = globalUserId ?? localUserId ?? formatted.User_Mgt_Id;
+            }
+            return formatted;
+        });
 
         return res.status(200).json({
             success: true,

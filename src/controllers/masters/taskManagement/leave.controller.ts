@@ -61,10 +61,10 @@ const checkUserPermission = (req: Request, permission?: string): boolean => {
   if (!user) return false;
   if (user.UserTypeId === 0) return true;
 
-  if (permission === 'create_leave' && ![1, 2, 3].includes(user.UserTypeId)) return false;
+  if (permission === 'create_leave' && !(Number(user.UserTypeId) >= 1)) return false;
   if (permission === 'update_leave' && ![1, 2].includes(user.UserTypeId)) return false;
   if (permission === 'delete_leave' && user.UserTypeId !== 1) return false;
-  if (permission === 'view_leave' && ![1, 2, 3].includes(user.UserTypeId)) return false;
+  if (permission === 'view_leave' && !(Number(user.UserTypeId) >= 1)) return false;
   if (permission === 'approve_leave' && ![1, 2].includes(user.UserTypeId)) return false;
 
   return true;

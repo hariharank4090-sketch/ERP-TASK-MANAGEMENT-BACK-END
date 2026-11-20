@@ -157,7 +157,30 @@ export type TaskQueryParams = z.infer<typeof taskQuerySchema>;
 // Helper function to format task for response
 export const formatTaskForResponse = (task: any) => {
   const taskData = task.get ? task.get({ plain: true }) : task;
-  
+  const planMap: Record<number, string> = {
+    1: 'Time Based',
+    2: 'Day Based',
+    3: 'Weekly Based',
+    4: 'Monthly Based',
+    5: 'Specific Day'
+  };
+
+  if (Array.isArray(taskData?.Schedules)) {
+    taskData.Schedules = taskData.Schedules.map((s: any) => {
+      const plain = s?.get ? s.get({ plain: true }) : s;
+      const planId = Number(plain?.Sch_Plan_Id ?? plain?.schPlanId);
+      const resolvedPlan =
+        typeof plain?.Plan_Type === 'string' && plain.Plan_Type.trim() !== ''
+          ? plain.Plan_Type.trim()
+          : (planMap[planId] || 'Time Based');
+      return {
+        ...plain,
+        Plan_Type: resolvedPlan,
+        planType: resolvedPlan
+      };
+    });
+  }
+
   return {
     ...taskData
   };

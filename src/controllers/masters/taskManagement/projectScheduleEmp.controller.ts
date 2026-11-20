@@ -76,6 +76,10 @@ function mapRawToTaskDetail(raw: any): TaskDetailWithSchedule {
         Schedule_Sch_End_Date: raw.Schedule_Sch_End_Date,
         Schedule_Task_Sch_Duaration: raw.Schedule_Task_Sch_Duaration,
         Schedule_Sch_Status: raw.Schedule_Sch_Status,
+        Schedule_Sch_Comp_Date: raw.Schedule_Sch_Comp_Date,
+        Schedule_Update_Date: raw.Schedule_Update_Date,
+        Schedule_Ticket_Id: raw.Schedule_Ticket_Id || raw.Ticket_Id,
+        Ticket_Id: raw.Schedule_Ticket_Id || raw.Ticket_Id,
         Task_Name: raw.Task_Name,
         Task_Desc: raw.Task_Desc,
         Task_Type_Id: raw.Task_Type_Id
@@ -142,6 +146,24 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
             sortOrder = 'DESC'
         } = validation.data!;
 
+        // Check optional columns on tbl_Project_Schedule to avoid invalid column errors across tenant DBs
+        const scheduleCols: any[] = await companyDB.query(
+            `SELECT name FROM sys.columns 
+             WHERE object_id = OBJECT_ID('tbl_Project_Schedule') 
+               AND name IN ('Ticket_Id', 'Sch_Comp_Date', 'Update_Date')`,
+            { type: 'SELECT' }
+        );
+        const scheduleColSet = new Set((scheduleCols || []).map((c: any) => String(c.name).toLowerCase()));
+        const hasTicketIdCol = scheduleColSet.has('ticket_id');
+        const hasSchCompDateCol = scheduleColSet.has('sch_comp_date');
+        const hasUpdateDateCol = scheduleColSet.has('update_date');
+
+        const outerApplyExtraCols = [
+            hasSchCompDateCol ? 'ps2.Sch_Comp_Date' : null,
+            hasUpdateDateCol ? 'ps2.Update_Date' : null,
+            hasTicketIdCol ? 'ps2.Ticket_Id' : null
+        ].filter(Boolean).join(', ');
+
         // Build WHERE conditions
         let whereClause = '1=1';
         const replacements: any = {};
@@ -175,13 +197,46 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
             startDate.setHours(0, 0, 0, 0);
             const endDate = new Date(to_Task_Assign_dt);
             endDate.setHours(23, 59, 59, 999);
-            whereClause += ' AND td.Task_Assign_dt <= :to_Task_Assign_dt AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, latest_ps.Sch_Status, 1) != 3)';
+            whereClause += ` AND td.Task_Assign_dt <= :to_Task_Assign_dt AND (
+                td.Task_Assign_dt >= :from_Task_Assign_dt 
+                OR COALESCE(ps.Sch_Status, latest_ps.Sch_Status, 1) != 3
+                ${hasSchCompDateCol ? 'OR CAST(COALESCE(ps.Sch_Comp_Date, latest_ps.Sch_Comp_Date) AS DATE) >= CAST(:from_Task_Assign_dt AS DATE)' : ''}
+                ${hasUpdateDateCol ? 'OR CAST(COALESCE(ps.Update_Date, latest_ps.Update_Date) AS DATE) >= CAST(:from_Task_Assign_dt AS DATE)' : ''}
+                ${hasTicketIdCol ? 'OR ps.Ticket_Id IS NOT NULL OR latest_ps.Ticket_Id IS NOT NULL' : ''}
+                OR ps.Sch_No LIKE 'TCK-%'
+                OR latest_ps.Sch_No LIKE 'TCK-%'
+                OR ps.Sch_No LIKE 'SCH-%'
+                OR latest_ps.Sch_No LIKE 'SCH-%'
+                OR EXISTS (
+                    SELECT 1 FROM tbl_Work_Master wm WITH (NOLOCK) 
+                    WHERE (wm.Sch_Id = td.Sch_Id OR (td.Sch_Id IS NULL AND wm.Task_Id = td.Task_Id))
+                      AND wm.Emp_Id = td.Emp_Id 
+                      AND CAST(wm.Work_Dt AS DATE) >= CAST(:from_Task_Assign_dt AS DATE)
+                      AND CAST(wm.Work_Dt AS DATE) <= CAST(:to_Task_Assign_dt AS DATE)
+                )
+            )`;
             replacements.from_Task_Assign_dt = startDate;
             replacements.to_Task_Assign_dt = endDate;
         } else if (from_Task_Assign_dt) {
             const startDate = new Date(from_Task_Assign_dt);
             startDate.setHours(0, 0, 0, 0);
-            whereClause += ' AND (td.Task_Assign_dt >= :from_Task_Assign_dt OR COALESCE(ps.Sch_Status, latest_ps.Sch_Status, 1) != 3)';
+            whereClause += ` AND (
+                td.Task_Assign_dt >= :from_Task_Assign_dt 
+                OR COALESCE(ps.Sch_Status, latest_ps.Sch_Status, 1) != 3
+                ${hasSchCompDateCol ? 'OR CAST(COALESCE(ps.Sch_Comp_Date, latest_ps.Sch_Comp_Date) AS DATE) >= CAST(:from_Task_Assign_dt AS DATE)' : ''}
+                ${hasUpdateDateCol ? 'OR CAST(COALESCE(ps.Update_Date, latest_ps.Update_Date) AS DATE) >= CAST(:from_Task_Assign_dt AS DATE)' : ''}
+                ${hasTicketIdCol ? 'OR ps.Ticket_Id IS NOT NULL OR latest_ps.Ticket_Id IS NOT NULL' : ''}
+                OR ps.Sch_No LIKE 'TCK-%'
+                OR latest_ps.Sch_No LIKE 'TCK-%'
+                OR ps.Sch_No LIKE 'SCH-%'
+                OR latest_ps.Sch_No LIKE 'SCH-%'
+                OR EXISTS (
+                    SELECT 1 FROM tbl_Work_Master wm WITH (NOLOCK) 
+                    WHERE (wm.Sch_Id = td.Sch_Id OR (td.Sch_Id IS NULL AND wm.Task_Id = td.Task_Id))
+                      AND wm.Emp_Id = td.Emp_Id 
+                      AND CAST(wm.Work_Dt AS DATE) >= CAST(:from_Task_Assign_dt AS DATE)
+                )
+            )`;
             replacements.from_Task_Assign_dt = startDate;
         } else if (to_Task_Assign_dt) {
             const endDate = new Date(to_Task_Assign_dt);
@@ -202,6 +257,10 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
                 COALESCE(ps.Sch_End_Date, latest_ps.Sch_End_Date) as Schedule_Sch_End_Date,
                 COALESCE(ps.Task_Sch_Duaration, latest_ps.Task_Sch_Duaration) as Schedule_Task_Sch_Duaration,
                 COALESCE(ps.Sch_Status, latest_ps.Sch_Status) as Schedule_Sch_Status,
+                ${hasSchCompDateCol ? 'COALESCE(ps.Sch_Comp_Date, latest_ps.Sch_Comp_Date)' : 'NULL'} as Schedule_Sch_Comp_Date,
+                ${hasUpdateDateCol ? 'COALESCE(ps.Update_Date, latest_ps.Update_Date)' : 'NULL'} as Schedule_Update_Date,
+                ${hasTicketIdCol ? 'COALESCE(ps.Ticket_Id, latest_ps.Ticket_Id)' : 'NULL'} as Schedule_Ticket_Id,
+                ${hasTicketIdCol ? 'COALESCE(ps.Ticket_Id, latest_ps.Ticket_Id)' : 'NULL'} as Ticket_Id,
                 t.Task_Name,
                 t.Task_Desc,
                 t.Task_Type_Id
@@ -211,7 +270,8 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
                  SELECT TOP 1 
                      ps2.Task_Sch_Timer_Based, ps2.Sch_No, ps2.Sch_Date, ps2.Task_Type_Id,
                      ps2.Sch_Plan_Id, ps2.Sch_Start_Date, ps2.Sch_End_Date,
-                     ps2.Task_Sch_Duaration, ps2.Sch_Status
+                     ps2.Task_Sch_Duaration, ps2.Sch_Status${outerApplyExtraCols ? `,
+                     ${outerApplyExtraCols}` : ''}
                  FROM tbl_Project_Schedule ps2 WITH (NOLOCK)
                  WHERE td.Sch_Id IS NULL AND ps2.Task_Id = td.Task_Id
                  ORDER BY ps2.Sch_Id DESC
@@ -247,9 +307,29 @@ export const getAllTaskDetails = async (req: Request, res: Response) => {
                 (!startDateObj || taskDateObj >= startDateObj) &&
                 (!endDateObj || taskDateObj <= endDateObj);
 
+            const isTicketSchedule = Boolean(
+                row.Schedule_Ticket_Id != null ||
+                row.Ticket_Id != null ||
+                (row.Schedule_Sch_No && (String(row.Schedule_Sch_No).includes('TCK') || String(row.Schedule_Sch_No).startsWith('SCH-')))
+            );
+
+            const targetDateStr = targetDateObj ? targetDateObj.toISOString().split('T')[0] : '';
+            const compDateStr = row.Schedule_Sch_Comp_Date ? new Date(row.Schedule_Sch_Comp_Date).toISOString().split('T')[0] : '';
+            const updateDateStr = row.Schedule_Update_Date ? new Date(row.Schedule_Update_Date).toISOString().split('T')[0] : '';
+            const isCompletedOnTargetDate = (row.Schedule_Sch_Status === 3) && (compDateStr === targetDateStr || updateDateStr === targetDateStr);
+
+            // Past tasks should carry forward to targetDateObj (current date) if:
+            // 1. Not completed (row.Schedule_Sch_Status !== 3)
+            // 2. Completed on targetDateObj (isCompletedOnTargetDate)
+            // 3. Ticket schedule completed on targetDateObj / current date (isTicketSchedule && row.Schedule_Sch_Status === 3)
+            const shouldCarryForward = Boolean(
+                targetDateObj && taskDateObj && taskDateObj < targetDateObj &&
+                (row.Schedule_Sch_Status !== 3 || isCompletedOnTargetDate || (isTicketSchedule && row.Schedule_Sch_Status === 3))
+            );
+
             if (isInsideRange) {
                 finalRows.push(row);
-            } else if (targetDateObj && taskDateObj && taskDateObj < targetDateObj && row.Schedule_Sch_Status !== 3) {
+            } else if (shouldCarryForward) {
                 const key = `${row.Sch_Id}_${row.Emp_Id || 0}_${row.Task_Id || 0}`;
                 if (!pastRowGroups[key]) {
                     pastRowGroups[key] = [];

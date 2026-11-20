@@ -88,7 +88,7 @@ const checkUserPermission = (req: Request, requiredPermission?: string): boolean
     if (requiredPermission === 'delete_parametdatatype' && user.UserTypeId !== 1) {
         return false;
     }
-    if (requiredPermission === 'view_parametdatatype' && ![1, 2, 3].includes(user.UserTypeId)) {
+    if (requiredPermission === 'view_parametdatatype' && !(Number(user.UserTypeId) >= 1)) {
         return false;
     }
     
