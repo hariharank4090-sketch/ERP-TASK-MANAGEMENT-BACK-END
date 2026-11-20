@@ -11,7 +11,16 @@ const swaggerOptions: Options = {
 
         servers: [
             {
+                url: "/",
+                description: "Current Server",
+            },
+            {
+                url: `http://localhost:${process.env.PORT || 9001}`,
+                description: "Local Development Server",
+            },
+            {
                 url: "http://localhost:5001",
+                description: "Fallback Local Server",
             },
         ],
 

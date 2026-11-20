@@ -179,6 +179,48 @@ export const getProjectsDropdown = async (req: Request, res: Response): Promise<
     }
 };
 
+// ───Project Stages ───────────────────────────────────────────────────────────
+
+export const getProjectStageDropdown = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const activeOnly =
+            req.query.activeOnly !== 'false' &&
+            req.query.includeInactive !== 'true' &&
+            req.query.IsActive !== '0';
+
+        const rawProjectId = req.query.projectId ?? req.query.Project_Id ?? req.params?.projectId;
+        const rawCompanyId = req.query.companyId ?? req.query.Company_Id ?? req.params?.companyId;
+
+        const projectId =
+            rawProjectId !== undefined && rawProjectId !== '' && !isNaN(Number(rawProjectId))
+                ? Number(rawProjectId)
+                : undefined;
+
+        const companyId =
+            rawCompanyId !== undefined && rawCompanyId !== '' && !isNaN(Number(rawCompanyId))
+                ? Number(rawCompanyId)
+                : undefined;
+
+        const data = await dropdownModel.getProjectStages(activeOnly, req, projectId, companyId);
+
+        res.status(200).json(<ApiResponse>{
+            success:   true,
+            message:   'Project stages retrieved successfully',
+            data,
+            count:     data.length,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error) {
+        console.error('❌ getProjectStageDropdown:', error);
+        res.status(500).json(<ApiResponse>{
+            success:   false,
+            message:   'Failed to retrieve project stages',
+            error:     error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date().toISOString(),
+        });
+    }
+};
+
 // ─── Company ──────────────────────────────────────────────────────────────────
 
 export const getCompanyDropdown = async (req: Request, res: Response): Promise<void> => {
@@ -235,6 +277,7 @@ export default {
     searchEmployeesController,
     getTaskDropdown,
     getProjectsDropdown,
+    getProjectStageDropdown,
     getCompanyDropdown,
     getAllDropdowns,
 };

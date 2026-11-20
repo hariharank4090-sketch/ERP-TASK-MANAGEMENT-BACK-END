@@ -5,6 +5,7 @@ import dropdownModel, {
   getEmployees,
   getTasks,
   getProjects,
+  getProjectStages,
   getCompany,
   getAllDropdowns,
 } from '../../../src/models/dropdown/dropdown.model';
@@ -14,6 +15,7 @@ describe('Dropdown Model Functions', () => {
   it('returns default bundle with all dropdown functions', () => {
     expect(dropdownModel.getProjectStatus).toBe(getProjectStatus);
     expect(dropdownModel.getEmployees).toBe(getEmployees);
+    expect(dropdownModel.getProjectStages).toBe(getProjectStages);
     expect(dropdownModel.getAllDropdowns).toBe(getAllDropdowns);
   });
 
@@ -60,5 +62,62 @@ describe('Dropdown Model Functions', () => {
 
     const companies = await getCompany(true, mockReq);
     expect(companies).toEqual([{ value: 101, label: 'Acme Industries' }]);
+  });
+
+  it('queries project stages from tbl_Project_Stage filtered by logged-in company', async () => {
+    const mockQuery = vi.fn().mockResolvedValue([
+      {
+        Id: 1,
+        Project_Id: 10,
+        Company_Id: 1,
+        Stage_Name: 'Requirement Gathering',
+        Sort_Order: 1,
+        IsActive: 1,
+        CreatedAt: '2026-09-25T10:00:00.000Z',
+        value: 1,
+        label: 'Requirement Gathering',
+      },
+      {
+        Id: 2,
+        Project_Id: 10,
+        Company_Id: 1,
+        Stage_Name: 'Development',
+        Sort_Order: 2,
+        IsActive: 1,
+        CreatedAt: '2026-09-25T10:05:00.000Z',
+        value: 2,
+        label: 'Development',
+      },
+    ]);
+
+    const mockReq = {
+      currentCompanyId: 1,
+      query: { projectId: '10' },
+      headers: {},
+      companyDB: {
+        config: { database: 'ERP_DB_TEST_25_09_2026' },
+        query: mockQuery,
+      },
+    } as unknown as Request;
+
+    const stages = await getProjectStages(true, mockReq);
+    expect(stages).toHaveLength(2);
+    expect(stages[0]).toEqual({
+      value: 1,
+      label: 'Requirement Gathering',
+      Id: 1,
+      Project_Id: 10,
+      Company_Id: 1,
+      Stage_Name: 'Requirement Gathering',
+      Sort_Order: 1,
+      IsActive: 1,
+      CreatedAt: '2026-09-25T10:00:00.000Z',
+    });
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.stringContaining('tbl_Project_Stage'),
+      expect.objectContaining({
+        replacements: { companyId: 1, projectId: 10 },
+      })
+    );
   });
 });

@@ -428,9 +428,15 @@ export async function getCompanyDatabase(identifier: number | string): Promise<S
     }
 
     if (!config && typeof identifier === 'string') {
-        const parsed = parseInt(identifier, 10);
-        if (!isNaN(parsed)) {
-            config = getCompanyConfig(parsed);
+        const mappedId = dbNameMapping.get(identifier);
+        if (mappedId !== undefined) {
+            config = getCompanyConfig(mappedId);
+        }
+        if (!config) {
+            const parsed = parseInt(identifier, 10);
+            if (!isNaN(parsed)) {
+                config = getCompanyConfig(parsed);
+            }
         }
     }
 

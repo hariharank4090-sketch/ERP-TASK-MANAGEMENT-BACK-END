@@ -1,6 +1,6 @@
 // src/models/dropdown/dropdown.model.ts
 import { QueryTypes, Sequelize } from 'sequelize';
-import { verifyTokenSession }    from '../../config/database.config';
+import { verifyTokenSession, getCompanyDatabase } from '../../config/database.config';
 import { Request }               from 'express';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -13,6 +13,18 @@ export interface DropdownItem {
 export interface ProjectHeadItem {
     UserId: string | number;
     label:  string;
+}
+
+export interface ProjectStageDropdownItem extends DropdownItem {
+    value:       number;
+    label:       string;
+    Id:          number;
+    Project_Id:  number | null;
+    Company_Id:  number | null;
+    Stage_Name:  string;
+    Sort_Order:  number | null;
+    IsActive:    number;
+    CreatedAt?:  Date | string | null;
 }
 
 // ─── Internal helper ──────────────────────────────────────────────────────────
@@ -31,6 +43,38 @@ function getSequelize(req: Request): Sequelize {
         );
     }
     return db;
+}
+
+/**
+ * Resolves the active company ID from query params, middleware properties, user record, or token session.
+ */
+function resolveCompanyId(req: Request, explicitCompanyId?: number): number | undefined {
+    if (explicitCompanyId !== undefined && Number.isFinite(explicitCompanyId) && explicitCompanyId > 0) {
+        return explicitCompanyId;
+    }
+
+    const queryComp = req.query?.companyId ?? req.query?.Company_Id;
+    if (queryComp !== undefined && queryComp !== '' && !isNaN(Number(queryComp)) && Number(queryComp) > 0) {
+        return Number(queryComp);
+    }
+
+    const reqComp = (req as any).currentCompanyId as number | undefined;
+    if (reqComp && Number.isFinite(reqComp) && reqComp > 0) {
+        return reqComp;
+    }
+
+    const userComp = (req as any).user?.Company_Id as number | undefined;
+    if (userComp && Number.isFinite(userComp) && userComp > 0) {
+        return Number(userComp);
+    }
+
+    const token = req.headers?.authorization?.split(' ')[1];
+    const session = token ? verifyTokenSession(token) : null;
+    if (session?.companyId && session.companyId > 0) {
+        return session.companyId;
+    }
+
+    return undefined;
 }
 
 // ─── ID column resolver ───────────────────────────────────────────────────────
@@ -155,23 +199,47 @@ export const getTasks = async (
     req?: Request,
 ): Promise<DropdownItem[]> => {
     if (!req) throw new Error('Request object is required');
+    const sequelize = getSequelize(req);
+    const companyId = resolveCompanyId(req);
+
+    // Primary table in this codebase is tbl_Task; fallback to tbl_Task_Master
     try {
-        const sequelize = getSequelize(req);
         let query = `
             SELECT [Task_Id] AS value, [Task_Name] AS label
-            FROM   [dbo].[tbl_Task_Master]
+            FROM   [dbo].[tbl_Task] WITH (NOLOCK)
             WHERE  1 = 1
         `;
-        if (activeOnly) query += ` AND [IsActive] = 1`;
+        const replacements: Record<string, any> = {};
+        if (companyId) {
+            query += ` AND ([Company_Id] = :companyId OR [Company_Id] IS NULL)`;
+            replacements.companyId = companyId;
+        }
         query += ` ORDER BY [Task_Name] ASC`;
 
         const rows = await sequelize.query<{ value: number; label: string }>(query, {
-            type: QueryTypes.SELECT, raw: true,
+            replacements,
+            type: QueryTypes.SELECT,
+            raw: true,
         });
         return rows.filter(r => r.label != null).map(r => ({ value: r.value, label: r.label || '' }));
-    } catch (err) {
-        console.warn('[getTasks] Table not found, returning empty:', (err as Error).message);
-        return [];
+    } catch (_) {
+        try {
+            let query = `
+                SELECT [Task_Id] AS value, [Task_Name] AS label
+                FROM   [dbo].[tbl_Task_Master]
+                WHERE  1 = 1
+            `;
+            if (activeOnly) query += ` AND [IsActive] = 1`;
+            query += ` ORDER BY [Task_Name] ASC`;
+
+            const rows = await sequelize.query<{ value: number; label: string }>(query, {
+                type: QueryTypes.SELECT, raw: true,
+            });
+            return rows.filter(r => r.label != null).map(r => ({ value: r.value, label: r.label || '' }));
+        } catch (err) {
+            console.warn('[getTasks] Table not found, returning empty:', (err as Error).message);
+            return [];
+        }
     }
 };
 
@@ -183,20 +251,201 @@ export const getProjects = async (
 ): Promise<DropdownItem[]> => {
     if (!req) throw new Error('Request object is required');
     const sequelize = getSequelize(req);
+    const companyId = resolveCompanyId(req);
 
     let query = `
         SELECT [Project_Id] AS value, [Project_Name] AS label
         FROM   [dbo].[tbl_Project_Master]
         WHERE  1 = 1
     `;
+    const replacements: Record<string, any> = {};
     if (activeOnly) query += ` AND [IsActive] = 1`;
+    if (companyId) {
+        query += ` AND ([Company_Id] = :companyId OR [Company_Id] IS NULL)`;
+        replacements.companyId = companyId;
+    }
     query += ` ORDER BY [Project_Name] ASC`;
 
     const rows = await sequelize.query<{ value: number; label: string }>(query, {
-        type: QueryTypes.SELECT, raw: true,
+        replacements,
+        type: QueryTypes.SELECT,
+        raw: true,
     });
 
     return rows.filter(r => r.label != null).map(r => ({ value: r.value, label: r.label || '' }));
+};
+
+// ─── getProjectStages ─────────────────────────────────────────────────────────
+
+function mapProjectStageRows(rows: any[]): ProjectStageDropdownItem[] {
+    return (rows || [])
+        .filter(r => (r?.Stage_Name ?? r?.label) != null)
+        .map(r => {
+            const id = Number(r.Id ?? r.value ?? 0);
+            const stageName = String(r.Stage_Name ?? r.label ?? '').trim();
+            const isActiveRaw = r.IsActive;
+            const isActive =
+                isActiveRaw === true || isActiveRaw === 1 || isActiveRaw === '1'
+                    ? 1
+                    : isActiveRaw === false || isActiveRaw === 0 || isActiveRaw === '0'
+                    ? 0
+                    : 1;
+
+            return {
+                value:      id,
+                label:      stageName,
+                Id:         id,
+                Project_Id: r.Project_Id != null ? Number(r.Project_Id) : null,
+                Company_Id: r.Company_Id != null ? Number(r.Company_Id) : null,
+                Stage_Name: stageName,
+                Sort_Order: r.Sort_Order != null ? Number(r.Sort_Order) : null,
+                IsActive:   isActive,
+                CreatedAt:  r.CreatedAt ?? null,
+            };
+        });
+}
+
+async function queryProjectStageTable(
+    db: Sequelize,
+    tableRef: string,
+    activeOnly: boolean,
+    companyId?: number,
+    projectId?: number,
+): Promise<any[]> {
+    let query = `
+        SELECT TOP (1000)
+            [Id],
+            [Project_Id],
+            [Company_Id],
+            [Stage_Name],
+            [Sort_Order],
+            CAST([IsActive] AS INT) AS [IsActive],
+            [CreatedAt],
+            [Id] AS [value],
+            [Stage_Name] AS [label]
+        FROM ${tableRef} WITH (NOLOCK)
+        WHERE 1 = 1
+    `;
+    const replacements: Record<string, any> = {};
+
+    if (activeOnly) {
+        query += ` AND [IsActive] = 1`;
+    }
+    if (companyId !== undefined && Number.isFinite(companyId) && companyId > 0) {
+        query += ` AND [Company_Id] = :companyId`;
+        replacements.companyId = companyId;
+    }
+    if (projectId !== undefined && Number.isFinite(projectId) && projectId > 0) {
+        query += ` AND [Project_Id] = :projectId`;
+        replacements.projectId = projectId;
+    }
+
+    query += ` ORDER BY ISNULL([Sort_Order], 2147483647) ASC, [Id] ASC`;
+
+    return db.query<any>(query, {
+        replacements,
+        type: QueryTypes.SELECT,
+        raw: true,
+    });
+}
+
+/**
+ * Retrieves project stages from [dbo].[tbl_Project_Stage] for the logged-in company.
+ * Connects to the company DB via req.companyDB (or explicit companyId) and filters by Company_Id,
+ * optional Project_Id, and IsActive status, ordered by Sort_Order ASC.
+ */
+export const getProjectStages = async (
+    activeOnly: boolean = true,
+    req?: Request,
+    projectId?: number,
+    companyId?: number,
+): Promise<ProjectStageDropdownItem[]> => {
+    if (!req) throw new Error('Request object is required');
+
+    let sequelize = getSequelize(req);
+    const resolvedCompanyId = resolveCompanyId(req, companyId);
+
+    const queryProj = req.query?.projectId ?? req.query?.Project_Id;
+    const resolvedProjectId =
+        projectId !== undefined && Number.isFinite(projectId) && projectId > 0
+            ? projectId
+            : queryProj !== undefined && queryProj !== '' && !isNaN(Number(queryProj)) && Number(queryProj) > 0
+            ? Number(queryProj)
+            : undefined;
+
+    // If an explicit companyId was requested that differs from req.currentCompanyId, try switching DB connection
+    if (
+        companyId &&
+        (req as any).currentCompanyId &&
+        companyId !== (req as any).currentCompanyId
+    ) {
+        try {
+            const targetDb = await getCompanyDatabase(companyId);
+            if (targetDb) sequelize = targetDb;
+        } catch (_) {}
+    }
+
+    // 1. Primary lookup: [dbo].[tbl_Project_Stage] on the connected company DB
+    try {
+        const rows = await queryProjectStageTable(
+            sequelize,
+            '[dbo].[tbl_Project_Stage]',
+            activeOnly,
+            resolvedCompanyId,
+            resolvedProjectId,
+        );
+        if (rows.length > 0) {
+            return mapProjectStageRows(rows);
+        }
+    } catch (_) {}
+
+    // 2. Same-server fallback: [ERP_DB_TEST_25_09_2026].[dbo].[tbl_Project_Stage]
+    try {
+        const rows = await queryProjectStageTable(
+            sequelize,
+            '[ERP_DB_TEST_25_09_2026].[dbo].[tbl_Project_Stage]',
+            activeOnly,
+            resolvedCompanyId,
+            resolvedProjectId,
+        );
+        if (rows.length > 0) {
+            return mapProjectStageRows(rows);
+        }
+    } catch (_) {}
+
+    // 3. Cross-server fallback if table resides on Company 1's SQL instance (ERP_DB_TEST_25_09_2026)
+    try {
+        const comp1Db = await getCompanyDatabase(1);
+        if (comp1Db && comp1Db !== sequelize) {
+            try {
+                const rows = await queryProjectStageTable(
+                    comp1Db,
+                    '[ERP_DB_TEST_25_09_2026].[dbo].[tbl_Project_Stage]',
+                    activeOnly,
+                    resolvedCompanyId,
+                    resolvedProjectId,
+                );
+                if (rows.length > 0) {
+                    return mapProjectStageRows(rows);
+                }
+            } catch (_) {}
+
+            try {
+                const rows = await queryProjectStageTable(
+                    comp1Db,
+                    '[dbo].[tbl_Project_Stage]',
+                    activeOnly,
+                    resolvedCompanyId,
+                    resolvedProjectId,
+                );
+                if (rows.length > 0) {
+                    return mapProjectStageRows(rows);
+                }
+            } catch (_) {}
+        }
+    } catch (_) {}
+
+    return [];
 };
 
 // ─── getCompany ───────────────────────────────────────────────────────────────
@@ -273,24 +522,27 @@ export const getAllDropdowns = async (
     employees:     DropdownItem[];
     tasks:         DropdownItem[];
     projects:      DropdownItem[];
+    projectStages: ProjectStageDropdownItem[];
     companies:     DropdownItem[];
 }> => {
-    const [ph, ps, emp, tasks, proj, comp] = await Promise.allSettled([
+    const [ph, ps, emp, tasks, proj, stages, comp] = await Promise.allSettled([
         getProjectHeads(activeOnly, req),
         getProjectStatus(),
         getEmployees(activeOnly, req),
         getTasks(activeOnly, req),
         getProjects(activeOnly, req),
+        getProjectStages(activeOnly, req),
         getCompany(activeOnly, req),
     ]);
 
     return {
-        projectHeads:  ph.status    === 'fulfilled' ? ph.value    : [],
-        projectStatus: ps.status    === 'fulfilled' ? ps.value    : [],
-        employees:     emp.status   === 'fulfilled' ? emp.value   : [],
-        tasks:         tasks.status === 'fulfilled' ? tasks.value : [],
-        projects:      proj.status  === 'fulfilled' ? proj.value  : [],
-        companies:     comp.status  === 'fulfilled' ? comp.value  : [],
+        projectHeads:  ph.status     === 'fulfilled' ? ph.value     : [],
+        projectStatus: ps.status     === 'fulfilled' ? ps.value     : [],
+        employees:     emp.status    === 'fulfilled' ? emp.value    : [],
+        tasks:         tasks.status  === 'fulfilled' ? tasks.value  : [],
+        projects:      proj.status   === 'fulfilled' ? proj.value   : [],
+        projectStages: stages.status === 'fulfilled' ? stages.value : [],
+        companies:     comp.status   === 'fulfilled' ? comp.value   : [],
     };
 };
 
@@ -339,6 +591,7 @@ export default {
     searchEmployees,
     getTasks,
     getProjects,
+    getProjectStages,
     getAllDropdowns,
     getCompany,
     getUsersByType,

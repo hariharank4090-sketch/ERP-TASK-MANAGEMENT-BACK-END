@@ -35,6 +35,7 @@ router.use('/processMaster', processMasterRoutes)
 router.use('/parametDataTypes', taskParamTypeRoutes)
 router.use('/paramMaster', paramMasterRoutes)
 router.use('/dropdowns', dropdownRoutes)
+router.use('/dropdown', dropdownRoutes)
 router.use('/users', userRoutes)
 
 router.use('/tasks', taskRoutes)

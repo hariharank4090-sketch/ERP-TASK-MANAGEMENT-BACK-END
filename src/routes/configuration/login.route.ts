@@ -26,6 +26,9 @@ const router = express.Router();
  *                 type: string
  *               password:
  *                 type: string
+ *               companyId:
+ *                 type: integer
+ *                 description: Optional Company ID to connect to on login
  *     responses:
  *       200:
  *         description: Login successful - returns user details (including Global_User_ID) and tokens for all companies
@@ -43,6 +46,9 @@ const router = express.Router();
  *                 data:
  *                   type: object
  *                   properties:
+ *                     token:
+ *                       type: string
+ *                       example: "token123example"
  *                     user:
  *                       type: object
  *                       properties:
@@ -61,6 +67,28 @@ const router = express.Router();
  *                         UserTypeId:
  *                           type: integer
  *                           example: 2
+ *                     availableCompanies:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           companyId:
+ *                             type: integer
+ *                           companyName:
+ *                             type: string
+ *                             example: "SM TRADERS"
+ *                           dbName:
+ *                             type: string
+ *                             example: "ERP_LIVE_DB_SMT"
+ *                           dbConnected:
+ *                             type: boolean
+ *                             example: true
+ *                           token:
+ *                             type: string
+ *                             example: "token123example"
+ *                           UserTypeId:
+ *                             type: integer
+ *                             example: 2
  *                     currentCompany:
  *                       type: array
  *                       items:
@@ -99,7 +127,7 @@ router.post('/', login);
  *     summary: Switch to a different company
  *     tags: [Authentication]
  *     security:
- *       - BearerAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -126,7 +154,7 @@ router.post('/switch-company', authenticate, setCompanyDatabase, switchCompany);
  *     summary: User logout
  *     tags: [Authentication]
  *     security:
- *       - BearerAuth: []
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Logout successful
@@ -142,7 +170,7 @@ router.post('/logout', authenticate, setCompanyDatabase, logout);
  *     summary: Verify authentication token
  *     tags: [Authentication]
  *     security:
- *       - BearerAuth: []
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Token is valid
@@ -158,7 +186,7 @@ router.get('/verify', authenticate, setCompanyDatabase, verifyToken);
  *     summary: Change user password
  *     tags: [Authentication]
  *     security:
- *       - BearerAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:

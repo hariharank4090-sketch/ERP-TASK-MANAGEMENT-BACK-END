@@ -509,13 +509,16 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
             status: 'success',
             message: 'Login successful',
             data: {
+                token: currentEntry?.token ?? '',
                 user: {
                     Global_User_ID: currentEntry?.Global_User_ID ?? user.Global_User_ID,
                     Local_User_ID: currentEntry?.Local_User_ID ?? user.Local_User_ID,
                     Name: user.Name,
                     UserName: user.UserName,
                     UserTypeId: currentEntry?.UserTypeId ?? user.UserTypeId,
+                    Company_Id: currentEntry?.companyId ?? user.Company_Id,
                 },
+                availableCompanies: companyList,
                 currentCompany: encryptedCompany,
                 serverTime: new Date().toISOString(),
             },

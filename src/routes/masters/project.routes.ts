@@ -19,6 +19,7 @@ import {
     reactivateProject,
     getProjectsForDropdown
 } from '../../controllers/masters/taskManagement/projectType.controller';
+import { getProjectStageDropdown } from '../../controllers/dropdown/dropdown.controller';
 import { authenticate, authorize } from '../../middleware/auth';
 
 const router = express.Router();
@@ -655,6 +656,67 @@ router.get('/status/:status', authenticate, authorize([]), getProjectsByStatus);
  *         description: Internal server error
  */
 router.get('/dropdown', authenticate, authorize([]), getProjectsForDropdown);
+
+/**
+ * @swagger
+ * /api/masters/project/stages/dropdown:
+ *   get:
+ *     summary: Get project stages for dropdown
+ *     description: Retrieve active project stages from tbl_Project_Stage for the logged-in user's connected company
+ *     tags: [Project Master]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: projectId
+ *         in: query
+ *         required: false
+ *         description: Filter stages by Project_Id
+ *         schema:
+ *           type: integer
+ *       - name: companyId
+ *         in: query
+ *         required: false
+ *         description: Optional Company_Id override (defaults to logged-in company)
+ *         schema:
+ *           type: integer
+ *       - name: activeOnly
+ *         in: query
+ *         required: false
+ *         description: Filter only active stages (IsActive = 1)
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *     responses:
+ *       200:
+ *         description: Project stages retrieved successfully for dropdown
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Project stages retrieved successfully"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/ProjectStageDropdownItem'
+ *                 count:
+ *                   type: integer
+ *                   example: 5
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         description: Unauthorized - No token provided
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/stages/dropdown', authenticate, authorize([]), getProjectStageDropdown);
+router.get('/stages', authenticate, authorize([]), getProjectStageDropdown);
 
 // ==================== CRUD OPERATIONS ====================
 

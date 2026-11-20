@@ -7,6 +7,7 @@ import {
     searchEmployeesController,
     getTaskDropdown,
     getProjectsDropdown,
+    getProjectStageDropdown,
     getCompanyDropdown,
     getAllDropdowns,
 } from '../../controllers/dropdown/dropdown.controller';
@@ -64,6 +65,52 @@ const guard = [authenticate, setCompanyDatabase, requireCompanyDB] as const;
  *           description: Display label
  *           example: "Active"
  *     
+ *     ProjectStageDropdownItem:
+ *       type: object
+ *       properties:
+ *         value:
+ *           type: integer
+ *           description: Stage ID (option value)
+ *           example: 1
+ *         label:
+ *           type: string
+ *           description: Stage name (display label)
+ *           example: "Planning"
+ *         Id:
+ *           type: integer
+ *           description: Stage primary key ID from tbl_Project_Stage
+ *           example: 1
+ *         Project_Id:
+ *           type: integer
+ *           nullable: true
+ *           description: Associated Project ID
+ *           example: 10
+ *         Company_Id:
+ *           type: integer
+ *           nullable: true
+ *           description: Associated Company ID
+ *           example: 1
+ *         Stage_Name:
+ *           type: string
+ *           description: Name of the project stage
+ *           example: "Planning"
+ *         Sort_Order:
+ *           type: integer
+ *           nullable: true
+ *           description: Display sort order
+ *           example: 1
+ *         IsActive:
+ *           type: integer
+ *           enum: [0, 1]
+ *           description: Active status (1 = Active, 0 = Inactive)
+ *           example: 1
+ *         CreatedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Record creation timestamp
+ *           example: "2026-09-25T10:00:00.000Z"
+ *     
  *     ApiResponse:
  *       type: object
  *       properties:
@@ -79,6 +126,7 @@ const guard = [authenticate, setCompanyDatabase, requireCompanyDB] as const;
  *             oneOf:
  *               - $ref: '#/components/schemas/DropdownItem'
  *               - $ref: '#/components/schemas/ProjectHeadItem'
+ *               - $ref: '#/components/schemas/ProjectStageDropdownItem'
  *         count:
  *           type: integer
  *           example: 25
@@ -126,6 +174,10 @@ const guard = [authenticate, setCompanyDatabase, requireCompanyDB] as const;
  *           type: array
  *           items:
  *             $ref: '#/components/schemas/DropdownItem'
+ *         projectStages:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/ProjectStageDropdownItem'
  *         companies:
  *           type: array
  *           items:
@@ -135,12 +187,30 @@ const guard = [authenticate, setCompanyDatabase, requireCompanyDB] as const;
  *     activeOnlyParam:
  *       name: activeOnly
  *       in: query
- *       description: Filter only active records (UDel_Flag = 0)
+ *       description: Filter only active records (IsActive = 1 / UDel_Flag = 0)
  *       required: false
  *       schema:
  *         type: boolean
  *         default: true
  *       example: true
+ *     
+ *     projectIdQueryParam:
+ *       name: projectId
+ *       in: query
+ *       description: Optional Project_Id to filter stages by project
+ *       required: false
+ *       schema:
+ *         type: integer
+ *       example: 1
+ *     
+ *     companyIdQueryParam:
+ *       name: companyId
+ *       in: query
+ *       description: Optional Company_Id override (defaults to the logged-in user's connected company)
+ *       required: false
+ *       schema:
+ *         type: integer
+ *       example: 1
  *     
  *     searchParam:
  *       name: search
@@ -375,6 +445,54 @@ router.get('/tasks', ...guard, getTaskDropdown);
  *         description: Internal server error
  */
 router.get('/projects', ...guard, getProjectsDropdown);
+
+// ── GET /api/masters/dropdowns/projectStages ─────────────────────────────────
+/**
+ * @swagger
+ * /api/masters/dropdowns/projectStages:
+ *   get:
+ *     summary: Get project stages dropdown
+ *     description: >
+ *       Returns list of project stages from `[dbo].[tbl_Project_Stage]` (`Id`, `Project_Id`, `Company_Id`, `Stage_Name`, `Sort_Order`, `IsActive`, `CreatedAt`)
+ *       for the logged-in user's connected company, ordered by `Sort_Order` ASC.
+ *     tags: [Dropdowns]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/activeOnlyParam'
+ *       - $ref: '#/components/parameters/projectIdQueryParam'
+ *       - $ref: '#/components/parameters/companyIdQueryParam'
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved project stages
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/ApiResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/ProjectStageDropdownItem'
+ *       401:
+ *         description: Unauthorized - Invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/projectStages', ...guard, getProjectStageDropdown);
+router.get('/projectStage', ...guard, getProjectStageDropdown);
+router.get('/project-stages', ...guard, getProjectStageDropdown);
+router.get('/stages', ...guard, getProjectStageDropdown);
 
 // ── GET /api/masters/dropdowns/company ───────────────────────────────────────
 /**

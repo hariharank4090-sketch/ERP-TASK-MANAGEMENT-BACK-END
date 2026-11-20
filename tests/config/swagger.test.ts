@@ -15,4 +15,13 @@ describe('Swagger Documentation Config', () => {
     expect(components.securitySchemes).toHaveProperty('bearerAuth');
     expect(components.securitySchemes.bearerAuth.scheme).toBe('bearer');
   });
+
+  it('registers the projectStages dropdown endpoint and schema in Swagger', () => {
+    const paths = (swaggerSpec as any).paths || {};
+    expect(paths).toHaveProperty('/api/masters/dropdowns/projectStages');
+    expect(paths['/api/masters/dropdowns/projectStages']).toHaveProperty('get');
+
+    const schemas = (swaggerSpec as any).components?.schemas || {};
+    expect(schemas).toHaveProperty('ProjectStageDropdownItem');
+  });
 });
